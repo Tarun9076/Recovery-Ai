@@ -1,6 +1,6 @@
 # RecoverAI
 
-**AI Revenue Recovery Orchestrator** — built for the Razorpay Buildathon.
+**AI Revenue Recovery Orchestrator**
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688)
