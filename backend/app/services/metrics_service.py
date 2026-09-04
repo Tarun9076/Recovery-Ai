@@ -61,12 +61,19 @@ def compute_campaign_metrics(session: Session, campaign: RecoveryCampaign) -> Re
 
 def compute_portfolio_metrics(session: Session) -> RecoveryMetrics:
     """Global, across every failed payment / opportunity / action."""
+    from app.models.recovery_prediction import RecoveryPrediction
+
     revenue_at_risk = session.exec(
         select(func.coalesce(func.sum(Payment.amount), 0.0)).where(Payment.status == PaymentStatus.failed)
     ).one()
-    recoverable_revenue = session.exec(
+    pred_recoverable = session.exec(
+        select(func.coalesce(func.sum(RecoveryPrediction.expected_recovery), 0.0))
+    ).one()
+    opp_recoverable = session.exec(
         select(func.coalesce(func.sum(RecoveryOpportunity.expected_recovery), 0.0))
     ).one()
+    recoverable_revenue = max(float(pred_recoverable), float(opp_recoverable))
+
     revenue_recovered = session.exec(
         select(func.coalesce(func.sum(RecoveryAction.recovered_amount), 0.0)).where(
             RecoveryAction.status == RecoveryActionStatus.RECOVERED

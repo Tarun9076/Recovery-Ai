@@ -99,6 +99,13 @@ export interface BusinessMetrics {
   recovery_rate: number;
 }
 
+export interface RecoveryMetricsRead {
+  revenue_at_risk: number;
+  recoverable_revenue: number;
+  revenue_recovered: number;
+  recovery_rate: number;
+}
+
 export interface BaselineComparison {
   targeted_transaction_value: number;
   targeted_payment_count: number;
@@ -115,6 +122,10 @@ export async function getModelEvaluation(): Promise<ModelEvaluation> {
 
 export async function getBusinessMetrics(): Promise<BusinessMetrics> {
   return apiFetch<BusinessMetrics>("/api/evaluation/business");
+}
+
+export async function getRecoveryMetrics(): Promise<RecoveryMetricsRead> {
+  return apiFetch<RecoveryMetricsRead>("/api/recovery/metrics");
 }
 
 export async function getBaselineComparison(): Promise<BaselineComparison> {
@@ -155,6 +166,12 @@ export async function getFailedPayments(limit = 15): Promise<PaginatedFailedPaym
   return apiFetch<PaginatedFailedPayments>(`/api/payments/failed?limit=${limit}`);
 }
 
+export interface RecoveryFactor {
+  factor: string;
+  direction: string;
+  shap_value: number;
+}
+
 export interface RecoveryOpportunity {
   payment_id: string;
   amount: number;
@@ -162,13 +179,65 @@ export interface RecoveryOpportunity {
   expected_recovery: number;
   payment_method: string;
   failure_category: string | null;
+  customer_id?: string;
+  created_at?: string;
+  segment?: string;
+  confidence?: number;
+  recommended_action?: string;
+  reason?: string;
 }
 
-interface PaginatedRecoveryOpportunities {
+export interface RecoveryOpportunityDetail extends RecoveryOpportunity {
+  currency: string;
+  customer_id: string;
+  created_at: string;
+  confidence: number;
+  segment: string;
+  top_factors: RecoveryFactor[];
+  model_name: string;
+  model_version: string;
+  feature_version: string;
+  training_timestamp: string;
+  predicted_at: string;
+}
+
+export interface PaginatedRecoveryOpportunities {
   total: number;
   limit: number;
   offset: number;
-  items: RecoveryOpportunity[];
+  items: RecoveryOpportunityDetail[];
+}
+
+export async function getRecoveryOpportunities(
+  segment?: string,
+  limit = 50,
+  offset = 0,
+): Promise<PaginatedRecoveryOpportunities> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (segment && segment !== "ALL") {
+    query.set("segment", segment);
+  }
+  return apiFetch<PaginatedRecoveryOpportunities>(`/api/recovery/opportunities?${query.toString()}`);
+}
+
+export interface AnalyzeResponse {
+  analyzed_count: number;
+  high_recovery_count: number;
+  medium_recovery_count: number;
+  low_recovery_count: number;
+  total_expected_recovery: number;
+  model_name: string;
+  model_version: string;
+  feature_version: string;
+  training_timestamp?: string;
+}
+
+export async function postAnalyzeRecovery(): Promise<AnalyzeResponse> {
+  return apiFetch<AnalyzeResponse>("/api/recovery/analyze", { method: "POST" });
+}
+
+export async function getOpportunity(paymentId: string): Promise<RecoveryOpportunityDetail> {
+  return apiFetch<RecoveryOpportunityDetail>(`/api/recovery/opportunities/${paymentId}`);
 }
 
 /** Payments the ML model already scores above the merchant's recovery-probability

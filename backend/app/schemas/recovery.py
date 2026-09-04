@@ -38,6 +38,8 @@ class RecoveryOpportunityRead(RecoveryPredictionRead):
     customer_id: uuid.UUID
     payment_method: str
     failure_category: str | None = None
+    recommended_action: str | None = None
+    reason: str | None = None
     created_at: datetime
 
 

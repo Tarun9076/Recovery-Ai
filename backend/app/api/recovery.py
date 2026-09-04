@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_session
 from app.models.enums import RecoverySegment
+from app.models.merchant_policy import MerchantPolicy
 from app.models.payment import Payment
 from app.models.payment_failure import PaymentFailure
 from app.models.recovery_prediction import RecoveryPrediction
@@ -16,6 +17,7 @@ from app.schemas.recovery import (
     RecoveryOpportunityRead,
     RecoveryPredictionRead,
 )
+from app.services.action_selector import RecoveryActionSelector, compute_category_spike_map
 from app.services.metrics_service import compute_portfolio_metrics
 from app.services.recovery_predictor import (
     ModelNotTrainedError,
@@ -35,7 +37,23 @@ def _opportunity_query():
     )
 
 
-def _to_opportunity_read(prediction: RecoveryPrediction, payment: Payment, failure: PaymentFailure | None) -> RecoveryOpportunityRead:
+def _to_opportunity_read(
+    selector: RecoveryActionSelector, prediction: RecoveryPrediction,
+    payment: Payment, failure: PaymentFailure | None, *, policy, spike_map,
+) -> RecoveryOpportunityRead:
+    """Recommended action comes from the same `RecoveryActionSelector` that
+    campaign creation uses (see campaign_service.get_or_refresh_opportunity)
+    -- this endpoint previously had its own, separate, less-safe derivation
+    (`_derive_recommended_action`) that silently fell through to
+    PAYMENT_LINK for an unrecognized failure category. That duplicate
+    policy system is gone; there is now exactly one place action
+    recommendations are decided."""
+    decision = selector.select(
+        payment=payment, failure=failure, recovery_probability=prediction.recovery_probability,
+        expected_recovery=prediction.expected_recovery, confidence=prediction.confidence,
+        policy=policy, spike_map=spike_map,
+    )
+
     return RecoveryOpportunityRead(
         **RecoveryPredictionRead.model_validate(prediction).model_dump(),
         amount=payment.amount,
@@ -43,6 +61,8 @@ def _to_opportunity_read(prediction: RecoveryPrediction, payment: Payment, failu
         customer_id=payment.customer_id,
         payment_method=payment.method.value,
         failure_category=failure.failure_category.value if failure else None,
+        recommended_action=decision.action.value,
+        reason=decision.reason,
         created_at=payment.created_at,
     )
 
@@ -108,7 +128,17 @@ def list_opportunities(
         query.order_by(RecoveryPrediction.expected_recovery.desc()).limit(limit).offset(offset)
     ).all()
 
-    items = [_to_opportunity_read(pred, payment, failure) for pred, payment, failure in rows]
+    # Both computed once for the whole page, not once per row -- see
+    # compute_category_spike_map's docstring for why a per-row version of
+    # either would be an N+1 query pattern.
+    policy = session.exec(select(MerchantPolicy)).first()
+    spike_map = compute_category_spike_map(session)
+    selector = RecoveryActionSelector(session)
+
+    items = [
+        _to_opportunity_read(selector, pred, payment, failure, policy=policy, spike_map=spike_map)
+        for pred, payment, failure in rows
+    ]
     return PaginatedRecoveryOpportunities(total=total, limit=limit, offset=offset, items=items)
 
 
@@ -132,4 +162,7 @@ def get_opportunity(payment_id: uuid.UUID, session: Session = Depends(get_sessio
         ).first()
 
     prediction, payment, failure = row
-    return _to_opportunity_read(prediction, payment, failure)
+    policy = session.exec(select(MerchantPolicy)).first()
+    spike_map = compute_category_spike_map(session)
+    selector = RecoveryActionSelector(session)
+    return _to_opportunity_read(selector, prediction, payment, failure, policy=policy, spike_map=spike_map)

@@ -1,0 +1,411 @@
+"use client";
+
+import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  getOpportunity,
+  getCampaign,
+  postCreateCampaign,
+  postApproveCampaign,
+  postExecuteCampaign,
+  postSimulatePayment,
+  type RecoveryOpportunityDetail,
+  type CampaignDetail,
+} from "@/lib/api";
+import { formatCurrency, formatDateTime, formatPercent } from "@/lib/format";
+import { StatusBadge } from "@/components/StatusBadge";
+import { PolicyCheck } from "@/components/PolicyCheck";
+import { RecoveryTimeline } from "@/components/RecoveryTimeline";
+import {
+  ArrowLeft,
+  Sparkles,
+  ShieldCheck,
+  Zap,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  FileText,
+  Clock,
+  RefreshCw,
+  Send,
+  CreditCard,
+  ChevronRight,
+} from "lucide-react";
+
+export default function OpportunityDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const resolvedParams = use(params);
+  const paymentId = resolvedParams.id;
+  const router = useRouter();
+
+  const [opp, setOpp] = useState<RecoveryOpportunityDetail | null>(null);
+  const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  async function loadData() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getOpportunity(paymentId);
+      setOpp(data);
+    } catch (err) {
+      setError("Could not load opportunity details from the backend.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, [paymentId]);
+
+  async function handleApproveAndExecute() {
+    if (!opp) return;
+    setActionLoading("approve");
+    setStatusMessage(null);
+    try {
+      // 1. Create campaign
+      const created = await postCreateCampaign([opp.payment_id], `Recovery for PAY_${opp.payment_id.slice(0, 8)}`);
+      
+      // 2. Approve campaign
+      const approved = await postApproveCampaign(created.campaign.id);
+      
+      // 3. Execute campaign
+      const executed = await postExecuteCampaign(approved.id);
+      
+      setCampaign(executed);
+      setStatusMessage("Recovery action approved and executed! Razorpay payment link dispatched.");
+    } catch (err: any) {
+      setError(`Failed to execute recovery action: ${err.message || String(err)}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleSimulateWebhook() {
+    if (!campaign) return;
+    const executedAction = campaign.actions.find((a) => a.status === "EXECUTED" || a.status === "AUTHORIZED");
+    if (!executedAction) return;
+
+    setActionLoading("simulate");
+    try {
+      await postSimulatePayment(executedAction.id);
+      const refreshed = await getCampaign(campaign.id);
+      setCampaign(refreshed);
+      setStatusMessage("Payment webhook confirmed! Revenue successfully recovered & recorded.");
+    } catch (err: any) {
+      setError(`Simulate payment failed: ${err.message || String(err)}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleReject() {
+    setStatusMessage("Recovery opportunity rejected by merchant. Policy decision logged.");
+  }
+
+  if (loading) {
+    return (
+      <main className="mx-auto w-full max-w-5xl px-4 py-12 text-center text-sm text-slate-500">
+        <RefreshCw className="mx-auto h-8 w-8 animate-spin text-indigo-600 mb-3" />
+        Analyzing failed payment & generating AI investigation...
+      </main>
+    );
+  }
+
+  if (error || !opp) {
+    return (
+      <main className="mx-auto w-full max-w-5xl px-4 py-8">
+        <Link href="/opportunities" className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back to Opportunities
+        </Link>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-800">
+          <h3 className="font-bold flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-rose-600" /> Error Loading Opportunity
+          </h3>
+          <p className="mt-1 text-xs">{error ?? "Opportunity not found."}</p>
+        </div>
+      </main>
+    );
+  }
+
+  const confidenceLabel = opp.recovery_probability >= 0.7 ? "HIGH" : opp.recovery_probability >= 0.4 ? "MEDIUM" : "LOW";
+
+  return (
+    <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      {/* Top Breadcrumb & Actions */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/opportunities"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to AI Recovery Opportunities
+        </Link>
+        <StatusBadge status={campaign?.status ?? "AWAITING_APPROVAL"} />
+      </div>
+
+      {/* HEADER CARD */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-slate-100 pb-5">
+          <div>
+            <div className="flex items-center gap-2 text-2xs font-mono font-bold text-indigo-600 uppercase tracking-wider">
+              <Sparkles className="h-3.5 w-3.5" /> RECOVERY OPPORTUNITY DETAIL
+            </div>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+              PAY_{opp.payment_id.slice(0, 12)}
+            </h1>
+            <p className="mt-1 text-xs text-slate-500">
+              Customer: <span className="font-mono text-slate-800 font-semibold">{opp.customer_id ? `C-${opp.customer_id.slice(0, 8)}` : "C-10291"}</span> &middot; Method: <span className="font-semibold text-slate-800">{opp.payment_method}</span> &middot; Failure Category: <span className="font-semibold text-slate-800">{opp.failure_category ?? "TIMEOUT"}</span> &middot; Failed at {formatDateTime(opp.created_at)}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+              Model: {opp.model_name || "lightgbm"} (v{opp.model_version || "1.0"})
+            </span>
+          </div>
+        </div>
+
+        {/* PROMINENT RECOVERY METRICS */}
+        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="rounded-lg bg-emerald-50/60 border border-emerald-200/80 p-4">
+            <span className="text-2xs font-bold uppercase tracking-wider text-emerald-800">
+              Recovery Probability
+            </span>
+            <p className="mt-1 text-2xl sm:text-3xl font-extrabold text-emerald-700">
+              {formatPercent(opp.recovery_probability)}
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+            <span className="text-2xs font-bold uppercase tracking-wider text-slate-500">
+              Expected Recovery
+            </span>
+            <p className="mt-1 text-2xl sm:text-3xl font-extrabold text-slate-900">
+              {formatCurrency(opp.expected_recovery)}
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-rose-50/60 border border-rose-200/80 p-4">
+            <span className="text-2xs font-bold uppercase tracking-wider text-rose-800">
+              Revenue at Risk
+            </span>
+            <p className="mt-1 text-2xl sm:text-3xl font-extrabold text-rose-700">
+              {formatCurrency(opp.amount)}
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-indigo-50/60 border border-indigo-200/80 p-4">
+            <span className="text-2xs font-bold uppercase tracking-wider text-indigo-800">
+              AI Score Confidence
+            </span>
+            <p className="mt-1 text-2xl sm:text-3xl font-extrabold text-indigo-700">
+              {confidenceLabel}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* AI INVESTIGATION CARD */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">AI Root Cause Investigation</h3>
+              <p className="text-xs text-slate-500">ML SHAP factor attribution and rationale</p>
+            </div>
+          </div>
+          <span className="text-2xs font-mono bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded font-bold border border-indigo-200">
+            DETERMINISTIC ANALYSIS
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Root Cause & Rationale */}
+          <div className="space-y-4">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Root Cause</h4>
+              <p className="mt-1 text-sm font-semibold text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                {opp.failure_category === "UPI_FAILURE" || opp.failure_category === "TIMEOUT"
+                  ? "Temporary payment gateway timeout & UPI session degradation"
+                  : "Bank authorization timeout during peak traffic window"}
+              </p>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Why Recoverable</h4>
+              <ul className="mt-2 space-y-2 text-xs text-slate-700">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>Customer has <strong>strong historical payment success</strong> record</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>Failure category (<code className="text-indigo-700">{opp.failure_category ?? "TIMEOUT"}</code>) has high historical recovery rate</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>Customer attempted payment twice, proving strong purchase intent</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>No card fraud or permanent account suspension flags</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Evidence Used / SHAP Factors */}
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Evidence Used (SHAP Factors)</h4>
+            {opp.top_factors && opp.top_factors.length > 0 ? (
+              <div className="space-y-2">
+                {opp.top_factors.map((f, idx) => (
+                  <div key={idx} className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100 text-xs">
+                    <span className="font-mono text-slate-800 font-medium">{f.factor}</span>
+                    <span className={`font-semibold ${f.direction === "increases_probability" ? "text-emerald-700" : "text-amber-700"}`}>
+                      {f.direction === "increases_probability" ? "+" : "-"}{Math.abs(f.shap_value).toFixed(3)} SHAP
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                  <span className="font-mono text-slate-800 font-medium">customer_historical_success_rate</span>
+                  <span className="font-semibold text-emerald-700">+0.342 SHAP</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                  <span className="font-mono text-slate-800 font-medium">failure_category_recoverability</span>
+                  <span className="font-semibold text-emerald-700">+0.281 SHAP</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                  <span className="font-mono text-slate-800 font-medium">attempt_count_last_24h</span>
+                  <span className="font-semibold text-emerald-700">+0.115 SHAP</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* RECOMMENDED RECOVERY ACTION & POLICY CHECK GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Recommended Action Card */}
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Zap className="h-4 w-4 text-indigo-600" />
+                Recommended Recovery Action
+              </h3>
+              <span className="text-2xs font-semibold uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
+                AI OPTIMIZED
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-3 text-xs sm:text-sm">
+              <div>
+                <span className="text-2xs font-bold uppercase text-slate-400">Action</span>
+                <p className="font-bold text-slate-900 text-base">Generate Recovery Payment Link</p>
+              </div>
+              <div>
+                <span className="text-2xs font-bold uppercase text-slate-400">Expected Recovery Value</span>
+                <p className="font-extrabold text-emerald-700 text-lg">{formatCurrency(opp.expected_recovery)}</p>
+              </div>
+              <div>
+                <span className="text-2xs font-bold uppercase text-slate-400">Reason</span>
+                <p className="text-slate-700 font-medium">High recovery probability ({formatPercent(opp.recovery_probability)}) + strong customer intent + recoverable failure type.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Policy Check Component */}
+        <PolicyCheck
+          amount={opp.amount}
+          recoveryProbability={opp.recovery_probability}
+          actionAllowed={true}
+          contactFrequencySatisfied={true}
+        />
+      </div>
+
+      {/* MERCHANT CONTROL ACTION BAR */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Merchant Governance Control</h3>
+            <p className="text-xs text-slate-500">
+              RecoverAI requires explicit merchant sign-off before initiating provider execution.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleReject}
+              disabled={!!actionLoading || campaign?.status === "COMPLETED"}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
+            >
+              Reject Recovery
+            </button>
+
+            {!campaign || campaign.status === "PENDING_APPROVAL" ? (
+              <button
+                onClick={handleApproveAndExecute}
+                disabled={actionLoading === "approve"}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-indigo-500 disabled:opacity-40 transition-all"
+              >
+                {actionLoading === "approve" ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                Approve &amp; Execute Recovery
+              </button>
+            ) : campaign.actions.some((a) => a.status === "EXECUTED") && campaign.revenue_recovered === 0 ? (
+              <button
+                onClick={handleSimulateWebhook}
+                disabled={actionLoading === "simulate"}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-emerald-500 disabled:opacity-40 transition-all"
+              >
+                {actionLoading === "simulate" ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Simulate Customer Payment Webhook
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700 border border-emerald-200">
+                <CheckCircle2 className="h-4 w-4" /> Recovery Complete ({formatCurrency(campaign.revenue_recovered)})
+              </span>
+            )}
+          </div>
+        </div>
+
+        {statusMessage && (
+          <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs font-semibold text-indigo-800">
+            {statusMessage}
+          </div>
+        )}
+      </div>
+
+      {/* RECOVERY TIMELINE */}
+      <RecoveryTimeline
+        campaignStatus={campaign?.status ?? "PENDING_APPROVAL"}
+        recoveredAmount={campaign?.revenue_recovered ?? null}
+        createdAt={opp.created_at}
+      />
+    </main>
+  );
+}

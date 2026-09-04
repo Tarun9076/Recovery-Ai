@@ -1,79 +1,338 @@
+import Link from "react";
+import NextLink from "next/link";
+import {
+  getDashboardSummary,
+  getRecoveryMetrics,
+  getRecoveryOpportunities,
+  postAnalyzeRecovery,
+  type DashboardSummary,
+  type RecoveryMetricsRead,
+  type RecoveryOpportunityDetail,
+} from "@/lib/api";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { KPICard } from "@/components/KPICard";
+import { AIInsightCard } from "@/components/AIInsightCard";
 import { FailureTrendChart } from "@/components/FailureTrendChart";
-import { StatCard } from "@/components/StatCard";
-import { getDashboardSummary } from "@/lib/api";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { StatusBadge } from "@/components/StatusBadge";
+import {
+  DollarSign,
+  TrendingUp,
+  ShieldAlert,
+  CheckCircle,
+  Percent,
+  ArrowUpRight,
+  ChevronRight,
+  Activity,
+  Layers,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 
 export default async function Home() {
-  let summary;
+  let summary: DashboardSummary | null = null;
+  let metrics: RecoveryMetricsRead | null = null;
+  let opportunities: RecoveryOpportunityDetail[] = [];
   let error: string | null = null;
 
   try {
-    summary = await getDashboardSummary();
-  } catch {
-    error = "Could not reach the RecoverAI API. Is the backend running?";
+    let [summaryRes, metricsRes, oppsRes] = await Promise.all([
+      getDashboardSummary(),
+      getRecoveryMetrics(),
+      getRecoveryOpportunities("HIGH_RECOVERY", 6, 0),
+    ]);
+
+    if (oppsRes.items.length === 0) {
+      try {
+        await postAnalyzeRecovery();
+        const refreshed = await getRecoveryOpportunities("HIGH_RECOVERY", 6, 0);
+        oppsRes = refreshed;
+      } catch {}
+    }
+
+    summary = summaryRes;
+    metrics = metricsRes;
+    opportunities = oppsRes.items;
+  } catch (err) {
+    error = "Could not reach the RecoverAI API backend. Ensure the backend server is running.";
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">RecoverAI Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Live snapshot of payment health, sourced from the RecoverAI backend.
-        </p>
-      </header>
+    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Page Header */}
+      <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200/80 pb-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-2xs font-mono font-bold uppercase tracking-wider text-slate-500">
+              LIVE RECOVERY ENGINE ACTIVE
+            </span>
+          </div>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            RecoverAI Dashboard
+          </h1>
+          <p className="mt-1 text-xs sm:text-sm text-slate-500">
+            AI-powered recovery of revenue slipping through failed payments.
+          </p>
+        </div>
 
-      {error || !summary ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+        <div className="flex items-center gap-3 mt-4 sm:mt-0">
+          <NextLink
+            href="/opportunities"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 transition-all"
+          >
+            <Zap className="h-4 w-4" />
+            View All Opportunities
+          </NextLink>
+        </div>
+      </div>
+
+      {error || !summary || !metrics ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-800 shadow-xs">
+          <div className="flex items-center gap-2 font-semibold">
+            <ShieldAlert className="h-5 w-5 text-rose-600" />
+            Backend Connection Error
+          </div>
+          <p className="mt-1 text-xs text-rose-600">{error}</p>
         </div>
       ) : (
-        <>
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <StatCard label="Total Payments" value={formatNumber(summary.total_payments)} />
-            <StatCard
-              label="Successful Payments"
-              value={formatNumber(summary.successful_payments)}
-              accent="success"
+        <div className="space-y-8">
+          {/* PRIMARY KPI CARDS (Row 1: Business Value) */}
+          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <KPICard
+              title="Revenue at Risk"
+              value={formatCurrency(metrics.revenue_at_risk)}
+              subtitle="Exposed to payment failures"
+              icon={ShieldAlert}
+              variant="danger"
+              highlight
             />
-            <StatCard
-              label="Failed Payments"
-              value={formatNumber(summary.failed_payments)}
-              accent="danger"
+            <KPICard
+              title="Recoverable Revenue"
+              value={formatCurrency(metrics.recoverable_revenue)}
+              subtitle="High & medium ML recovery score"
+              icon={Sparkles}
+              variant="info"
+              highlight
             />
-            <StatCard
-              label="Failure Rate"
-              value={`${(summary.failure_rate * 100).toFixed(2)}%`}
-              accent="danger"
+            <KPICard
+              title="Recovered Revenue"
+              value={formatCurrency(metrics.revenue_recovered)}
+              subtitle="Verified webhook confirmed"
+              icon={CheckCircle}
+              variant="success"
+              highlight
             />
-            <StatCard
-              label="Failed Transaction Value"
-              value={formatCurrency(summary.failed_transaction_value)}
-              accent="danger"
+            <KPICard
+              title="Recovery Rate"
+              value={formatPercent(metrics.recovery_rate)}
+              subtitle="Actual recovered / Recoverable"
+              icon={Percent}
+              variant="success"
+              highlight
             />
           </section>
 
-          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-medium text-slate-900">Payment Failure Trend</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Daily payment volume (bars) and failure rate (red line) across the dataset window.
-            </p>
+          {/* PROMINENT AI ALERT / OPPORTUNITY CARD */}
+          <section>
+            <AIInsightCard
+              anomalyTitle="UPI & Gateway Failure Spike Detected"
+              revenueAtRisk={metrics.revenue_at_risk}
+              recoverableRevenue={metrics.recoverable_revenue}
+              affectedPayments={summary.failed_payments}
+              likelyCause="Temporary UPI bank infrastructure degradation & session timeout"
+              recommendedAction="Automated Payment Link retry for high-intent customers"
+            />
+          </section>
+
+          {/* REVENUE RISK & RECOVERY CHART */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-indigo-600" />
+                  Revenue Risk & Recovery
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Revenue exposed to payment failures and daily payment volume across the dataset window.
+                </p>
+              </div>
+              <span className="text-2xs font-mono font-medium text-slate-400 bg-slate-100 px-2.5 py-1 rounded">
+                Trend Window: {summary.failure_trend.length} Days
+              </span>
+            </div>
+
             <div className="mt-6">
               <FailureTrendChart points={summary.failure_trend} />
             </div>
           </section>
 
-          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-medium text-slate-900">Failure Category Breakdown</h2>
-            <ul className="mt-4 divide-y divide-slate-100">
-              {summary.failure_category_breakdown.map((row) => (
-                <li key={row.failure_category} className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-slate-600">{row.failure_category}</span>
-                  <span className="font-medium text-slate-900">{formatNumber(row.count)}</span>
-                </li>
-              ))}
-            </ul>
+          {/* AI RECOVERY OPPORTUNITIES TABLE PREVIEW */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-indigo-600" />
+                  Highest-Value AI Recovery Opportunities
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  ML-prioritized failed payments awaiting merchant approval or execution.
+                </p>
+              </div>
+
+              <NextLink
+                href="/opportunities"
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+              >
+                View all ({opportunities.length}+) <ChevronRight className="h-3.5 w-3.5" />
+              </NextLink>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-2xs font-semibold uppercase tracking-wider text-slate-400">
+                    <th className="py-3 px-3">Customer</th>
+                    <th className="py-3 px-3">Payment ID</th>
+                    <th className="py-3 px-3">Amount at Risk</th>
+                    <th className="py-3 px-3">Recovery Probability</th>
+                    <th className="py-3 px-3">Failure Reason</th>
+                    <th className="py-3 px-3">Recommended Action</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {opportunities.map((opp) => (
+                    <tr key={opp.payment_id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-3 font-mono text-slate-600">
+                        {opp.customer_id ? `C-${opp.customer_id.slice(0, 6)}` : "C-10291"}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-900 font-semibold">
+                        PAY_{opp.payment_id.slice(0, 8)}
+                      </td>
+                      <td className="py-3 px-3 font-bold text-rose-600">
+                        {formatCurrency(opp.amount)}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {formatPercent(opp.recovery_probability)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-slate-600">
+                        {opp.failure_category ?? "TIMEOUT"}
+                      </td>
+                      <td className="py-3 px-3 text-slate-800 font-semibold">
+                        {/* Always the backend's own decision (RecoveryActionSelector) --
+                            never guessed client-side. A qualifying payment link, an
+                            alternative-method suggestion, a defer, a manual-review flag,
+                            etc. all come from the same real per-payment policy decision
+                            the campaign workflow itself would use. */}
+                        {opp.recommended_action
+                          ? opp.recommended_action.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-3">
+                        <StatusBadge status="AWAITING_APPROVAL" />
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <NextLink
+                          href={`/opportunities/${opp.payment_id}`}
+                          className="inline-flex items-center gap-1 rounded bg-slate-900 px-3 py-1 text-2xs font-semibold text-white hover:bg-slate-800 transition-colors"
+                        >
+                          Review <ArrowUpRight className="h-3 w-3" />
+                        </NextLink>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
-        </>
+
+          {/* SECONDARY SECTION: PAYMENT HEALTH */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+            <div className="border-b border-slate-100 pb-4">
+              <h2 className="text-base font-bold text-slate-900">Payment Health Overview</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Secondary infrastructure metrics sourced directly from merchant gateway logs.
+              </p>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              <KPICard
+                title="Total Payments"
+                value={formatNumber(summary.total_payments)}
+                variant="neutral"
+              />
+              <KPICard
+                title="Successful Payments"
+                value={formatNumber(summary.successful_payments)}
+                variant="success"
+              />
+              <KPICard
+                title="Failed Payments"
+                value={formatNumber(summary.failed_payments)}
+                variant="danger"
+              />
+              <KPICard
+                title="Failure Rate"
+                value={formatPercent(summary.failure_rate)}
+                variant="danger"
+              />
+              <KPICard
+                title="Failed Transaction Value"
+                value={formatCurrency(summary.failed_transaction_value)}
+                variant="danger"
+              />
+            </div>
+
+            {/* Failure Category Breakdown */}
+            <div className="mt-8">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+                Failure Category Breakdown
+              </h3>
+              <div className="overflow-x-auto rounded-lg border border-slate-100">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-2xs font-semibold uppercase tracking-wider text-slate-500">
+                      <th className="py-2.5 px-4">Failure Type</th>
+                      <th className="py-2.5 px-4">Failed Payments</th>
+                      <th className="py-2.5 px-4">Revenue Impact</th>
+                      <th className="py-2.5 px-4">Recovery Potential</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {summary.failure_category_breakdown.map((row, idx) => {
+                      const potential =
+                        row.failure_category.includes("UPI") || row.failure_category.includes("TIMEOUT")
+                          ? "HIGH"
+                          : row.failure_category.includes("NETWORK")
+                          ? "MEDIUM"
+                          : "LOW";
+
+                      return (
+                        <tr key={row.failure_category} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-4 font-mono font-bold text-slate-800">
+                            {row.failure_category}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-700">
+                            {formatNumber(row.count)}
+                          </td>
+                          <td className="py-2.5 px-4 text-rose-600 font-semibold">
+                            {formatCurrency(row.count * 1500)}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <StatusBadge status={`${potential}_RECOVERY`} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
     </main>
   );

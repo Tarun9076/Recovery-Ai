@@ -93,7 +93,21 @@ class RecoverySegment(str, Enum):
 class RecommendedAction(str, Enum):
     """The investigation agent's (Phase 3) and the opportunity/campaign
     workflow's (Phase 4) shared action vocabulary -- defined once here so a
-    DB column and the agent's Pydantic schema can never drift apart."""
+    DB column and the agent's Pydantic schema can never drift apart.
+
+    Only PAYMENT_LINK is actually executable by the current
+    `PaymentProvider` abstraction (it can only ever create a payment link --
+    see `app/services/payment_provider.py`). Every other value is a
+    recommendation the merchant/audit trail can see, never something a
+    campaign can silently execute -- see
+    `app/services/action_selector.EXECUTABLE_ACTIONS`.
+
+    DEFER and REQUEST_CUSTOMER_CORRECTION were added in Phase 9 (the
+    action-selection fix -- see app/services/action_selector.py) because
+    neither NO_ACTION (permanent write-off) nor MANUAL_REVIEW (needs a
+    human look) correctly describes "not now, but plausibly worth revisiting"
+    (DEFER) or "the customer needs to fix something before any retry can
+    work" (REQUEST_CUSTOMER_CORRECTION, e.g. INVALID_DETAILS)."""
 
     PAYMENT_LINK = "PAYMENT_LINK"
     RETRY = "RETRY"
@@ -101,6 +115,8 @@ class RecommendedAction(str, Enum):
     REMINDER = "REMINDER"
     NO_ACTION = "NO_ACTION"
     MANUAL_REVIEW = "MANUAL_REVIEW"
+    DEFER = "DEFER"
+    REQUEST_CUSTOMER_CORRECTION = "REQUEST_CUSTOMER_CORRECTION"
 
 
 class OpportunityStatus(str, Enum):

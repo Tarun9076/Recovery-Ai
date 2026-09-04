@@ -12,26 +12,32 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from app.agents.revenue_recovery_agent import LOW_CONFIDENCE_THRESHOLD
 from app.models.customer import Customer
 from app.models.enums import (
     AuditEventType,
     CampaignStatus,
     OpportunityStatus,
     PaymentStatus,
-    RecommendedAction,
     RecoveryActionStatus,
 )
 from app.models.merchant import Merchant
 from app.models.merchant_policy import MerchantPolicy
 from app.models.payment import Payment
+from app.models.payment_failure import PaymentFailure
 from app.models.recovery_action import RecoveryAction
 from app.models.recovery_campaign import RecoveryCampaign
 from app.models.recovery_opportunity import RecoveryOpportunity
 from app.services import recovery_predictor
+from app.services.action_selector import (
+    EXECUTABLE_ACTIONS,
+    ActionDecision,
+    CategorySpikeMap,
+    RecoveryActionSelector,
+    compute_category_spike_map,
+)
 from app.services.audit import write_audit_log
 from app.services.payment_provider import PaymentProvider, get_payment_provider
-from app.services.policy_engine import PolicyCheckResult, PolicyEngine
+from app.services.policy_engine import PolicyEngine
 
 
 class OpportunityValidationError(ValueError):
@@ -50,13 +56,21 @@ class CampaignStateError(ValueError):
     pass
 
 
-def get_or_refresh_opportunity(session: Session, payment_id: uuid.UUID) -> tuple[RecoveryOpportunity, list[PolicyCheckResult]]:
-    """Recomputes a payment's recovery prediction and policy-gated
-    recommendation from scratch and upserts `recovery_opportunities` --
-    never reads a possibly-stale cached probability/action from the
-    request. Returns the opportunity plus the policy checks run against it
-    (so the caller can decide whether it qualifies for a *new* campaign
-    without re-running the checks)."""
+def get_or_refresh_opportunity(
+    session: Session, payment_id: uuid.UUID, *, spike_map: CategorySpikeMap | None = None,
+) -> tuple[RecoveryOpportunity, ActionDecision]:
+    """Recomputes a payment's recovery prediction AND its recommended action
+    from scratch and upserts `recovery_opportunities` -- never reads a
+    possibly-stale cached probability/action from the request.
+
+    The action recommendation is delegated entirely to
+    `RecoveryActionSelector` (spec: ML predicts *whether* a payment is
+    recoverable, a separate policy layer decides *what to do about it* --
+    see action_selector.py's module docstring for the bug this fixes).
+    `create_campaign` (the only caller that processes more than one payment
+    per call) computes `spike_map` once and passes it in; a single on-demand
+    refresh computes it fresh here (two cheap aggregate queries, not a
+    per-payment cost -- see compute_category_spike_map's docstring)."""
     payment = session.get(Payment, payment_id)
     if payment is None or payment.status != PaymentStatus.failed:
         raise OpportunityValidationError(f"{payment_id} is not a failed payment.")
@@ -66,20 +80,16 @@ def get_or_refresh_opportunity(session: Session, payment_id: uuid.UUID) -> tuple
     expected_recovery = prediction["expected_recovery"]
     confidence = prediction["confidence"]
 
+    failure = session.exec(select(PaymentFailure).where(PaymentFailure.payment_id == payment_id)).first()
     policy = session.exec(select(MerchantPolicy)).first()
-    engine = PolicyEngine(session)
-    checks = engine.evaluate_opportunity(probability=probability, customer_id=payment.customer_id, policy=policy)
+    if spike_map is None:
+        spike_map = compute_category_spike_map(session)
 
-    if all(c.passed for c in checks):
-        action = RecommendedAction.PAYMENT_LINK
-        reason = "Qualifies for automated recovery: " + "; ".join(c.reason for c in checks)
-    elif confidence < LOW_CONFIDENCE_THRESHOLD:
-        action = RecommendedAction.MANUAL_REVIEW
-        reason = f"Model confidence {confidence:.0%} is below the manual-review threshold."
-    else:
-        action = RecommendedAction.NO_ACTION
-        failed_reasons = "; ".join(c.reason for c in checks if not c.passed)
-        reason = f"Does not qualify: {failed_reasons}"
+    selector = RecoveryActionSelector(session)
+    decision = selector.select(
+        payment=payment, failure=failure, recovery_probability=probability,
+        expected_recovery=expected_recovery, confidence=confidence, policy=policy, spike_map=spike_map,
+    )
 
     existing = session.exec(
         select(RecoveryOpportunity).where(RecoveryOpportunity.payment_id == payment_id)
@@ -88,8 +98,8 @@ def get_or_refresh_opportunity(session: Session, payment_id: uuid.UUID) -> tuple
     if existing is not None:
         existing.recovery_probability = probability
         existing.expected_recovery = expected_recovery
-        existing.recommended_action = action
-        existing.reason = reason
+        existing.recommended_action = decision.action
+        existing.reason = decision.reason
         existing.confidence = confidence
         existing.updated_at = datetime.now(timezone.utc)
         session.add(existing)
@@ -98,13 +108,13 @@ def get_or_refresh_opportunity(session: Session, payment_id: uuid.UUID) -> tuple
         opportunity = RecoveryOpportunity(
             payment_id=payment_id, customer_id=payment.customer_id,
             recovery_probability=probability, expected_recovery=expected_recovery,
-            recommended_action=action, reason=reason, confidence=confidence,
+            recommended_action=decision.action, reason=decision.reason, confidence=confidence,
         )
         session.add(opportunity)
 
     session.commit()
     session.refresh(opportunity)
-    return opportunity, checks
+    return opportunity, decision
 
 
 def _has_active_recovery_action(session: Session, payment_id: uuid.UUID) -> bool:
@@ -123,8 +133,8 @@ def _has_active_recovery_action(session: Session, payment_id: uuid.UUID) -> bool
 
 
 def _cap_by_customer_within_batch(
-    included: list[tuple[RecoveryOpportunity, list[PolicyCheckResult]]], max_contacts: int,
-) -> tuple[list[tuple[RecoveryOpportunity, list[PolicyCheckResult]]], list[dict]]:
+    included: list[tuple[RecoveryOpportunity, ActionDecision]], max_contacts: int,
+) -> tuple[list[tuple[RecoveryOpportunity, ActionDecision]], list[dict]]:
     """A per-opportunity contact-limit check only sees *prior* campaigns --
     it can't see siblings being selected into this same new campaign. This
     catches that: within one campaign, no customer gets more than
@@ -133,7 +143,7 @@ def _cap_by_customer_within_batch(
     ordered = sorted(included, key=lambda pair: pair[0].expected_recovery, reverse=True)
     seen: dict[uuid.UUID, int] = {}
     kept, excluded = [], []
-    for opportunity, checks in ordered:
+    for opportunity, decision in ordered:
         count = seen.get(opportunity.customer_id, 0)
         if count >= max_contacts:
             excluded.append({
@@ -142,7 +152,7 @@ def _cap_by_customer_within_batch(
             })
             continue
         seen[opportunity.customer_id] = count + 1
-        kept.append((opportunity, checks))
+        kept.append((opportunity, decision))
     return kept, excluded
 
 
@@ -154,8 +164,12 @@ def create_campaign(
         raise CampaignValidationError("No merchant configured.")
     policy = session.exec(select(MerchantPolicy)).first()
     engine = PolicyEngine(session)
+    # Computed once for the whole batch, not once per payment -- see
+    # compute_category_spike_map's docstring for why a per-payment version
+    # of this would be an N+1 query pattern.
+    spike_map = compute_category_spike_map(session)
 
-    included: list[tuple[RecoveryOpportunity, list[PolicyCheckResult]]] = []
+    included: list[tuple[RecoveryOpportunity, ActionDecision]] = []
     excluded: list[dict] = []
 
     for payment_id in payment_ids:
@@ -167,17 +181,27 @@ def create_campaign(
             continue
 
         try:
-            opportunity, checks = get_or_refresh_opportunity(session, payment_id)
+            opportunity, decision = get_or_refresh_opportunity(session, payment_id, spike_map=spike_map)
         except OpportunityValidationError as exc:
             excluded.append({"payment_id": str(payment_id), "reason": str(exc)})
             continue
 
-        if all(c.passed for c in checks):
-            included.append((opportunity, checks))
+        # Only an action the current provider abstraction can actually
+        # execute (today: PAYMENT_LINK only -- see action_selector.py's
+        # EXECUTABLE_ACTIONS) may become a real, executable campaign line
+        # item. A payment recommended ALTERNATIVE_PAYMENT_METHOD,
+        # REQUEST_CUSTOMER_CORRECTION, DEFER, RETRY, NO_ACTION, or
+        # MANUAL_REVIEW is reported back as excluded, with the action
+        # decision's own reason -- never silently defaulted to a payment
+        # link. This is the fix for the reported bug: previously *any*
+        # qualifying payment (regardless of the recommended action) was
+        # included and executed as a payment link.
+        if decision.executable:
+            included.append((opportunity, decision))
         else:
             excluded.append({
                 "payment_id": str(payment_id),
-                "reason": "; ".join(c.reason for c in checks if not c.passed),
+                "reason": f"Recommended action is {decision.action.value}, not currently executable: {decision.reason}",
             })
 
     max_contacts = policy.max_customer_contacts if policy else 1
@@ -202,7 +226,7 @@ def create_campaign(
     session.add(campaign)
     session.flush()
 
-    for opportunity, _checks in included:
+    for opportunity, _decision in included:
         opportunity.status = OpportunityStatus.REVIEWED
         opportunity.updated_at = datetime.now(timezone.utc)
         session.add(opportunity)
@@ -373,14 +397,29 @@ def _execute_campaign(session: Session, campaign: RecoveryCampaign, *, provider:
         customer = session.get(Customer, action.customer_id)
         opportunity = session.get(RecoveryOpportunity, action.opportunity_id)
 
-        try:
-            response = provider.create_recovery_link(
-                payment_id=action.payment_id, amount=payment.amount, currency=payment.currency,
-                customer_name=customer.name, customer_email=customer.email, customer_contact=customer.phone,
-                reference_id=str(action.id),
-            )
-        except Exception as exc:  # provider failure -- record and move on, never crash the whole campaign
-            response = {"success": False, "error": str(exc), "error_type": type(exc).__name__}
+        # Final eligibility gate (spec: "the frontend must never be able to
+        # bypass this"): `create_campaign` only ever includes an executable
+        # action (see EXECUTABLE_ACTIONS), so this should be unreachable in
+        # practice -- but it's the last backend checkpoint before a
+        # financial action fires, so it revalidates rather than trusting
+        # that upstream invariant. A non-executable action_type fails
+        # closed as FAILED, exactly like a real provider error, instead of
+        # ever calling the provider for an action it was never eligible for.
+        if action.action_type not in EXECUTABLE_ACTIONS:
+            response = {
+                "success": False,
+                "error": f"Action type {action.action_type.value} is not executable by the current payment provider.",
+                "error_type": "ActionNotExecutable",
+            }
+        else:
+            try:
+                response = provider.create_recovery_link(
+                    payment_id=action.payment_id, amount=payment.amount, currency=payment.currency,
+                    customer_name=customer.name, customer_email=customer.email, customer_contact=customer.phone,
+                    reference_id=str(action.id),
+                )
+            except Exception as exc:  # provider failure -- record and move on, never crash the whole campaign
+                response = {"success": False, "error": str(exc), "error_type": type(exc).__name__}
 
         action.provider_response = response
         action.payment_link_id = response.get("payment_link_id")

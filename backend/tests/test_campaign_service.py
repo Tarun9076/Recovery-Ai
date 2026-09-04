@@ -371,3 +371,57 @@ def test_can_retry_a_payment_whose_only_action_failed(db_session, dataset, clean
     )
     assert retry_campaign.target_count == 1
     assert excluded == []
+
+
+def test_create_campaign_excludes_a_non_executable_recommended_action(db_session, dataset, clean_campaign_state, monkeypatch):
+    """Integration-level regression test for the reported bug, at the real
+    `create_campaign` entry point (not just the RecoveryActionSelector unit
+    tests) -- a high-probability CARD_LIMIT failure must be excluded with
+    its real recommended action in the reason, never silently included as a
+    payment link the way it was before this fix."""
+    upi_payment_id = dataset.payment_failures[0]["payment_id"]  # UPI_FAILURE -- executable
+    card_limit_payment_id = dataset.payment_failures[3]["payment_id"]  # CARD_LIMIT -- not executable
+    _patch_predictions(monkeypatch, {
+        upi_payment_id: _prediction(0.9),
+        card_limit_payment_id: _prediction(0.9),
+    })
+
+    campaign, excluded = campaign_service.create_campaign(
+        db_session, name="Mixed categories", payment_ids=[upi_payment_id, card_limit_payment_id],
+        created_by="tester",
+    )
+
+    assert campaign.target_count == 1
+    included_action = db_session.exec(
+        select(RecoveryAction).where(RecoveryAction.campaign_id == campaign.id)
+    ).one()
+    assert included_action.payment_id == upi_payment_id
+    assert included_action.action_type == RecommendedAction.PAYMENT_LINK
+
+    assert len(excluded) == 1
+    assert excluded[0]["payment_id"] == str(card_limit_payment_id)
+    assert "ALTERNATIVE_PAYMENT_METHOD" in excluded[0]["reason"]
+    assert "not currently executable" in excluded[0]["reason"]
+
+
+def test_already_recovered_payment_is_not_selectable_into_a_new_campaign(db_session, dataset, clean_campaign_state, monkeypatch):
+    """Idempotency (spec section 6/10): a payment already RECOVERED must
+    stay excluded from a fresh campaign, exactly like an in-flight one."""
+    payment_id = _two_failed_payment_ids(dataset, 1)[0]
+    _patch_predictions(monkeypatch, {payment_id: _prediction(0.9)})
+
+    campaign, _ = campaign_service.create_campaign(
+        db_session, name="Original", payment_ids=[payment_id], created_by="tester",
+    )
+    campaign_service.approve_campaign(db_session, campaign.id, approved_by="owner")
+
+    action = db_session.exec(select(RecoveryAction).where(RecoveryAction.payment_id == payment_id)).one()
+    action.status = RecoveryActionStatus.RECOVERED
+    action.recovered_amount = action.provider_response and 1000.0
+    db_session.add(action)
+    db_session.commit()
+
+    with pytest.raises(campaign_service.CampaignValidationError):
+        campaign_service.create_campaign(
+            db_session, name="Duplicate", payment_ids=[payment_id], created_by="tester",
+        )

@@ -1,4 +1,4 @@
-import { StatCard } from "@/components/StatCard";
+import { KPICard } from "@/components/KPICard";
 import {
   getBaselineComparison,
   getBusinessMetrics,
@@ -8,151 +8,236 @@ import {
   type ModelEvaluation,
 } from "@/lib/api";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/format";
+import {
+  Activity,
+  BarChart2,
+  CheckCircle,
+  HelpCircle,
+  Info,
+  Layers,
+  ShieldAlert,
+  Sliders,
+  Sparkles,
+  Target,
+} from "lucide-react";
 
 function BaselineComparisonPanel({ comparison }: { comparison: BaselineComparison }) {
   if (comparison.targeted_payment_count === 0) {
     return (
-      <p className="text-sm text-slate-500">
-        RecoverAI hasn&apos;t targeted any failed payments with a recovery campaign yet -- run the Demo Control
-        Panel to generate a comparison.
-      </p>
+      <div className="rounded-lg bg-slate-50 p-6 text-center text-xs text-slate-500 border border-slate-200">
+        <Info className="mx-auto h-5 w-5 text-slate-400 mb-1" />
+        No targeted payments with a recovery campaign recorded yet. Run the Demo Control Panel or approve opportunities to generate causal baseline comparison data.
+      </div>
     );
   }
 
-  const maxValue = Math.max(comparison.baseline_recovered_revenue, comparison.recoverai_recovered_revenue, 1);
+  const maxValue = Math.max(
+    comparison.baseline_recovered_revenue,
+    comparison.recoverai_recovered_revenue,
+    1,
+  );
   const isPositive = comparison.incremental_recovered_revenue >= 0;
 
   return (
-    <div>
-      <p className="text-xs text-slate-500">
-        Scoped to the {formatNumber(comparison.targeted_payment_count)} failed payments (
-        {formatCurrency(comparison.targeted_transaction_value)}) RecoverAI has actually targeted with a recovery
-        campaign -- not the whole portfolio, so this is a fair like-for-like comparison.
-      </p>
+    <div className="space-y-6">
+      <div className="rounded-lg bg-blue-50/60 border border-blue-200/80 p-4 text-xs text-blue-900 leading-relaxed">
+        <strong className="font-semibold flex items-center gap-1.5 mb-1">
+          <Info className="h-4 w-4 text-blue-600" /> Evaluation Methodology &amp; Scope Note
+        </strong>
+        Scoped to the <strong>{formatNumber(comparison.targeted_payment_count)} failed payments</strong> (
+        {formatCurrency(comparison.targeted_transaction_value)}) targeted by RecoverAI. Organically recovered payments without AI intervention serve as the baseline comparison window to ensure transparent, causal accounting.
+      </div>
 
-      <div className="mt-5 space-y-3">
+      <div className="space-y-4">
         <div>
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-slate-600">Baseline (no AI intervention)</span>
-            <span className="text-slate-900">
+          <div className="flex items-baseline justify-between text-xs sm:text-sm mb-1.5">
+            <span className="font-semibold text-slate-700">Baseline Organic Recovery (No Intervention)</span>
+            <span className="font-bold text-slate-900">
               {formatCurrency(comparison.baseline_recovered_revenue)} ({formatPercent(comparison.baseline_recovery_rate)})
             </span>
           </div>
-          <div className="mt-1 h-3 w-full rounded-full bg-slate-100">
+          <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden">
             <div
-              className="h-3 rounded-full bg-slate-400"
-              style={{ width: `${(comparison.baseline_recovered_revenue / maxValue) * 100}%` }}
+              className="h-3 rounded-full bg-slate-400 transition-all duration-300"
+              style={{ width: `${Math.min(100, (comparison.baseline_recovered_revenue / maxValue) * 100)}%` }}
             />
           </div>
         </div>
 
         <div>
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-slate-600">RecoverAI (verified recovery)</span>
-            <span className="text-slate-900">
+          <div className="flex items-baseline justify-between text-xs sm:text-sm mb-1.5">
+            <span className="font-semibold text-slate-700">RecoverAI Verified Recovery</span>
+            <span className="font-bold text-emerald-700">
               {formatCurrency(comparison.recoverai_recovered_revenue)} ({formatPercent(comparison.recoverai_recovery_rate)})
             </span>
           </div>
-          <div className="mt-1 h-3 w-full rounded-full bg-slate-100">
+          <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden">
             <div
-              className="h-3 rounded-full bg-emerald-500"
-              style={{ width: `${(comparison.recoverai_recovered_revenue / maxValue) * 100}%` }}
+              className="h-3 rounded-full bg-emerald-500 transition-all duration-300"
+              style={{ width: `${Math.min(100, (comparison.recoverai_recovered_revenue / maxValue) * 100)}%` }}
             />
           </div>
         </div>
       </div>
 
-      <p className={`mt-4 text-sm font-medium ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
-        Incremental recovered revenue: {isPositive ? "+" : ""}
-        {formatCurrency(comparison.incremental_recovered_revenue)}
-      </p>
+      <div className={`rounded-xl p-4 border flex items-center justify-between ${
+        isPositive ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-rose-50 border-rose-200 text-rose-900"
+      }`}>
+        <div>
+          <span className="text-2xs font-bold uppercase tracking-wider text-slate-500">Incremental Net Revenue Impact</span>
+          <p className={`text-xl font-bold ${isPositive ? "text-emerald-700" : "text-rose-700"}`}>
+            {isPositive ? "+" : ""}{formatCurrency(comparison.incremental_recovered_revenue)}
+          </p>
+        </div>
+        <span className="text-2xs font-mono font-semibold uppercase px-2.5 py-1 rounded bg-white border">
+          {isPositive ? "POSITIVE GAIN" : "SIMULATION SCOPED"}
+        </span>
+      </div>
     </div>
   );
 }
 
 function ModelEvaluationPanel({ model }: { model: ModelEvaluation }) {
-  const metrics: { label: string; value: string }[] = [
-    { label: "Precision", value: model.precision.toFixed(3) },
-    { label: "Recall", value: model.recall.toFixed(3) },
-    { label: "F1", value: model.f1.toFixed(3) },
-    { label: "ROC-AUC", value: model.roc_auc.toFixed(3) },
-    { label: "PR-AUC", value: model.pr_auc.toFixed(3) },
-    { label: "Brier score", value: model.brier_score.toFixed(3) },
+  const metricsList = [
+    { label: "Precision", value: model.precision.toFixed(3), desc: "Accuracy of predicted recoveries" },
+    { label: "Recall", value: model.recall.toFixed(3), desc: "Coverage of true recoverable set" },
+    { label: "F1 Score", value: model.f1.toFixed(3), desc: "Harmonic mean of precision & recall" },
+    { label: "ROC-AUC", value: model.roc_auc.toFixed(3), desc: "Discriminative ability across thresholds" },
+    { label: "PR-AUC", value: model.pr_auc.toFixed(3), desc: "Area under Precision-Recall curve" },
+    { label: "Brier Score", value: model.brier_score.toFixed(3), desc: "Probability calibration accuracy" },
   ];
 
   return (
-    <div>
-      <p className="text-xs text-slate-500">
-        {model.algorithm} (v{model.model_version}, feature set {model.feature_version}) &middot; trained{" "}
-        {formatDateTime(model.training_timestamp)} &middot; decision threshold {model.decision_threshold} &middot;{" "}
-        {model.dataset_size != null ? `${formatNumber(model.dataset_size)} training payments` : null}
-      </p>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 text-xs text-slate-500">
+        <div>
+          Algorithm: <strong className="text-slate-800 font-mono">{model.algorithm}</strong> &middot; Model v{model.model_version} &middot; Feature Set v{model.feature_version}
+        </div>
+        <div>
+          Trained: <strong className="text-slate-800">{formatDateTime(model.training_timestamp)}</strong> &middot; Threshold: <strong className="text-slate-800 font-mono">{model.decision_threshold}</strong>
+        </div>
+      </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-4 sm:grid-cols-6">
-        {metrics.map((m) => (
-          <div key={m.label}>
-            <p className="text-xs font-medium text-slate-500">{m.label}</p>
-            <p className="mt-1 text-xl font-semibold text-slate-900">{m.value}</p>
+      {/* METRICS GRID */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {metricsList.map((m) => (
+          <div key={m.label} className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+            <span className="text-2xs font-bold uppercase tracking-wider text-slate-500">{m.label}</span>
+            <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{m.value}</p>
+            <p className="mt-1 text-3xs text-slate-400 line-clamp-1">{m.desc}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-6 overflow-x-auto">
-        <table className="w-full min-w-[480px] text-left text-sm">
-          <thead>
-            <tr className="text-xs uppercase tracking-wide text-slate-400">
-              <th className="pb-2 pr-4 font-medium">Confusion outcome</th>
-              <th className="pb-2 pr-4 font-medium">Count</th>
-              <th className="pb-2 font-medium">Revenue cost</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            <tr>
-              <td className="py-2 pr-4 text-slate-600">False positives (predicted recoverable, wasn&apos;t)</td>
-              <td className="py-2 pr-4 text-slate-900">{formatNumber(model.false_positive_count)}</td>
-              <td className="py-2 text-red-600">{formatCurrency(model.false_positive_revenue_cost)}</td>
-            </tr>
-            <tr>
-              <td className="py-2 pr-4 text-slate-600">False negatives (predicted not recoverable, was)</td>
-              <td className="py-2 pr-4 text-slate-900">{formatNumber(model.false_negative_count)}</td>
-              <td className="py-2 text-red-600">{formatCurrency(model.false_negative_revenue_cost)}</td>
-            </tr>
-            <tr>
-              <td className="py-2 pr-4 text-slate-600">True positives</td>
-              <td className="py-2 pr-4 text-slate-900">{formatNumber(model.true_positive_count)}</td>
-              <td className="py-2 text-slate-400">—</td>
-            </tr>
-            <tr>
-              <td className="py-2 pr-4 text-slate-600">True negatives</td>
-              <td className="py-2 pr-4 text-slate-900">{formatNumber(model.true_negative_count)}</td>
-              <td className="py-2 text-slate-400">—</td>
-            </tr>
-          </tbody>
-        </table>
+      {/* CONFUSION OUTCOMES & REVENUE COST TABLE */}
+      <div>
+        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+          Confusion Outcomes &amp; Revenue Cost of Errors
+        </h4>
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-left text-xs sm:text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-2xs font-semibold uppercase tracking-wider text-slate-500">
+                <th className="py-3 px-4">Confusion Outcome</th>
+                <th className="py-3 px-4">Count</th>
+                <th className="py-3 px-4">Financial Cost Impact</th>
+                <th className="py-3 px-4">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              <tr className="hover:bg-rose-50/30">
+                <td className="py-3 px-4 text-rose-800 font-bold">
+                  False Positives (Predicted recoverable, wasn&apos;t)
+                </td>
+                <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                  {formatNumber(model.false_positive_count)}
+                </td>
+                <td className="py-3 px-4 font-bold text-rose-600">
+                  {formatCurrency(model.false_positive_revenue_cost)}
+                </td>
+                <td className="py-3 px-4 text-slate-500 text-xs">
+                  Operational outreach cost incurred without successful payment completion
+                </td>
+              </tr>
+              <tr className="hover:bg-rose-50/30">
+                <td className="py-3 px-4 text-rose-800 font-bold">
+                  False Negatives (Predicted not recoverable, was)
+                </td>
+                <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                  {formatNumber(model.false_negative_count)}
+                </td>
+                <td className="py-3 px-4 font-bold text-rose-600">
+                  {formatCurrency(model.false_negative_revenue_cost)}
+                </td>
+                <td className="py-3 px-4 text-slate-500 text-xs">
+                  Missed recoverable revenue opportunity due to conservative AI scoring threshold
+                </td>
+              </tr>
+              <tr className="hover:bg-emerald-50/30">
+                <td className="py-3 px-4 text-emerald-800 font-bold">True Positives</td>
+                <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                  {formatNumber(model.true_positive_count)}
+                </td>
+                <td className="py-3 px-4 text-emerald-600 font-bold">—</td>
+                <td className="py-3 px-4 text-slate-500 text-xs">Successfully targeted and recovered failed payments</td>
+              </tr>
+              <tr className="hover:bg-slate-50">
+                <td className="py-3 px-4 text-slate-700 font-bold">True Negatives</td>
+                <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                  {formatNumber(model.true_negative_count)}
+                </td>
+                <td className="py-3 px-4 text-slate-400">—</td>
+                <td className="py-3 px-4 text-slate-500 text-xs">Correctly filtered out unrecoverable payment failures</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {model.calibration_bins.length > 0 && (
-        <div className="mt-6">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Calibration (predicted probability vs. actual recovery rate)
+      {/* CALIBRATION TABLE */}
+      {model.calibration_bins && model.calibration_bins.length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+            Probability Calibration Bins
           </h4>
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[400px] text-left text-sm">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="w-full text-left text-xs">
               <thead>
-                <tr className="text-xs uppercase tracking-wide text-slate-400">
-                  <th className="pb-2 pr-4 font-medium">Mean predicted</th>
-                  <th className="pb-2 pr-4 font-medium">Actual rate</th>
-                  <th className="pb-2 font-medium">Count</th>
+                <tr className="border-b border-slate-200 bg-slate-50 text-2xs font-semibold uppercase tracking-wider text-slate-500">
+                  <th className="py-2.5 px-4">Mean Predicted Probability</th>
+                  <th className="py-2.5 px-4">Actual Empirical Recovery Rate</th>
+                  <th className="py-2.5 px-4">Sample Size</th>
+                  <th className="py-2.5 px-4">Calibration Fit</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {model.calibration_bins.map((bin, i) => (
-                  <tr key={i}>
-                    <td className="py-1.5 pr-4 text-slate-600">{formatPercent(bin.mean_predicted)}</td>
-                    <td className="py-1.5 pr-4 text-slate-600">{formatPercent(bin.actual_rate)}</td>
-                    <td className="py-1.5 text-slate-500">{formatNumber(bin.count)}</td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {model.calibration_bins.map((bin, i) => {
+                  const diff = Math.abs(bin.mean_predicted - bin.actual_rate);
+                  const isWellCalibrated = diff < 0.1;
+
+                  return (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-4 font-mono text-slate-800">
+                        {formatPercent(bin.mean_predicted)}
+                      </td>
+                      <td className="py-2.5 px-4 font-mono text-slate-900 font-bold">
+                        {formatPercent(bin.actual_rate)}
+                      </td>
+                      <td className="py-2.5 px-4 text-slate-600">
+                        {formatNumber(bin.count)}
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <span
+                          className={`inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded ${
+                            isWellCalibrated ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          {isWellCalibrated ? "Well Calibrated" : "Mild Discrepancy"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -174,59 +259,69 @@ export default async function EvaluationPage() {
   const baseline: BaselineComparison | null = baselineResult.status === "fulfilled" ? baselineResult.value : null;
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Evaluation</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Real ML and business metrics, computed fresh on every load -- nothing on this page is hardcoded.
+    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      {/* Header */}
+      <div className="border-b border-slate-200/80 pb-5">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-2xs font-semibold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+            <Target className="h-3 w-3" /> MODEL &amp; CAUSAL EVALUATION
+          </span>
+        </div>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          Evaluation
+        </h1>
+        <p className="mt-1 text-xs sm:text-sm text-slate-500">
+          Measure whether RecoverAI actually identifies and recovers revenue responsibly.
         </p>
-      </header>
+      </div>
 
-      <section>
-        <h2 className="text-lg font-medium text-slate-900">Business impact</h2>
+      {/* SECTION 1: BUSINESS IMPACT */}
+      <section className="space-y-4">
+        <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <Activity className="h-4 w-4 text-indigo-600" />
+          1. Business Impact
+        </h2>
         {business ? (
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <StatCard label="Failed Transaction Value" value={formatCurrency(business.failed_transaction_value)} accent="danger" />
-            <StatCard label="Revenue at Risk" value={formatCurrency(business.revenue_at_risk)} accent="danger" />
-            <StatCard label="Predicted Recoverable" value={formatCurrency(business.predicted_recoverable_revenue)} />
-            <StatCard label="Actual Recovered" value={formatCurrency(business.actual_recovered_revenue)} accent="success" />
-            <StatCard label="Recovery Rate" value={formatPercent(business.recovery_rate)} accent="success" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <KPICard title="Failed Transaction Value" value={formatCurrency(business.failed_transaction_value)} variant="danger" />
+            <KPICard title="Revenue at Risk" value={formatCurrency(business.revenue_at_risk)} variant="danger" highlight />
+            <KPICard title="Predicted Recoverable" value={formatCurrency(business.predicted_recoverable_revenue)} variant="info" />
+            <KPICard title="Actual Recovered" value={formatCurrency(business.actual_recovered_revenue)} variant="success" highlight />
+            <KPICard title="Recovery Rate" value={formatPercent(business.recovery_rate)} variant="success" highlight />
           </div>
         ) : (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            Could not load business metrics from the RecoverAI API.
-          </p>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700">
+            Could not load business metrics from backend.
+          </div>
         )}
       </section>
 
-      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-slate-900">Baseline vs. RecoverAI</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          What would have recovered organically vs. what RecoverAI actually recovered, using real simulation results.
-        </p>
-        <div className="mt-6">
-          {baseline ? (
-            <BaselineComparisonPanel comparison={baseline} />
-          ) : (
-            <p className="text-sm text-red-700">Could not load the baseline comparison.</p>
-          )}
-        </div>
+      {/* SECTION 2: BASELINE VS RECOVERAI */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+        <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <BarChart2 className="h-4 w-4 text-indigo-600" />
+          2. Baseline vs. RecoverAI
+        </h2>
+        {baseline ? (
+          <BaselineComparisonPanel comparison={baseline} />
+        ) : (
+          <div className="text-xs text-rose-600">Could not load baseline comparison data.</div>
+        )}
       </section>
 
-      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-medium text-slate-900">Model evaluation</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Scored against the model&apos;s held-out temporal test split -- see ml/evaluation/evaluate.py.
-        </p>
-        <div className="mt-6">
-          {model ? (
-            <ModelEvaluationPanel model={model} />
-          ) : (
-            <p className="text-sm text-red-700">
-              No trained model found. Run <code>python ml/training/train.py</code> first.
-            </p>
-          )}
-        </div>
+      {/* SECTION 3 & 4: MODEL EVALUATION & CALIBRATION */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+        <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <Sliders className="h-4 w-4 text-indigo-600" />
+          3. Held-Out Model Evaluation &amp; Calibration
+        </h2>
+        {model ? (
+          <ModelEvaluationPanel model={model} />
+        ) : (
+          <div className="text-xs text-rose-600">
+            No trained model metrics found. Train the ML model using <code>python ml/training/train.py</code>.
+          </div>
+        )}
       </section>
     </main>
   );

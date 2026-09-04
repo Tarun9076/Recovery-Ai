@@ -15,19 +15,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RecoverAI Dashboard",
-  description: "AI Revenue Recovery Orchestrator",
+  title: "RecoverAI | AI Revenue Recovery Orchestrator",
+  description: "AI-powered recovery of revenue slipping through failed merchant payments.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 selection:bg-indigo-500 selection:text-white">
         <NavBar />
-        {children}
+        <div className="flex-1">{children}</div>
       </body>
     </html>
   );

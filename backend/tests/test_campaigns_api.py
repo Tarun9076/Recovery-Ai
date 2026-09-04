@@ -83,7 +83,11 @@ def test_full_lifecycle_via_api(client, dataset, clean_campaign_state, monkeypat
 
 
 def test_approve_twice_returns_409(client, dataset, clean_campaign_state, monkeypatch):
-    payment_ids = [dataset.payment_failures[3]["payment_id"]]
+    # index 12, not 3: payment_failures[3] is a CARD_LIMIT failure, which
+    # the action selector correctly recommends ALTERNATIVE_PAYMENT_METHOD
+    # for (not executable) -- this test is about approval idempotency, so
+    # it needs a payment whose recommended action is actually executable.
+    payment_ids = [dataset.payment_failures[12]["payment_id"]]
     _patch_predictions(monkeypatch, {pid: _prediction(0.9) for pid in payment_ids})
     campaign_id = client.post("/api/recovery/campaigns", json={
         "name": "x", "payment_ids": [str(pid) for pid in payment_ids], "created_by": "a",
