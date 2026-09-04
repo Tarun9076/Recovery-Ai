@@ -17,6 +17,13 @@ import {
 import { formatCurrency, formatDateTime, formatPercent } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PolicyCheck } from "@/components/PolicyCheck";
+
+// The only action the current PaymentProvider abstraction can actually
+// execute -- mirrors app/services/action_selector.EXECUTABLE_ACTIONS on the
+// backend. campaign_service.create_campaign rejects (422) any campaign
+// whose only candidate has a non-executable recommendation, so the frontend
+// must check this before offering to approve/execute/reject one.
+const EXECUTABLE_ACTION = "PAYMENT_LINK";
 import { RecoveryTimeline } from "@/components/RecoveryTimeline";
 import {
   ArrowLeft,
@@ -48,6 +55,7 @@ export default function OpportunityDetailPage({
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   async function loadData() {
@@ -71,20 +79,21 @@ export default function OpportunityDetailPage({
     if (!opp) return;
     setActionLoading("approve");
     setStatusMessage(null);
+    setActionError(null);
     try {
       // 1. Create campaign
       const created = await postCreateCampaign([opp.payment_id], `Recovery for PAY_${opp.payment_id.slice(0, 8)}`);
-      
+
       // 2. Approve campaign
       const approved = await postApproveCampaign(created.campaign.id);
-      
+
       // 3. Execute campaign
       const executed = await postExecuteCampaign(approved.id);
-      
+
       setCampaign(executed);
       setStatusMessage("Recovery action approved and executed! Razorpay payment link dispatched.");
     } catch (err: any) {
-      setError(`Failed to execute recovery action: ${err.message || String(err)}`);
+      setActionError(`Failed to execute recovery action: ${err.message || String(err)}`);
     } finally {
       setActionLoading(null);
     }
@@ -96,13 +105,14 @@ export default function OpportunityDetailPage({
     if (!executedAction) return;
 
     setActionLoading("simulate");
+    setActionError(null);
     try {
       await postSimulatePayment(executedAction.id);
       const refreshed = await getCampaign(campaign.id);
       setCampaign(refreshed);
       setStatusMessage("Payment webhook confirmed! Revenue successfully recovered & recorded.");
     } catch (err: any) {
-      setError(`Simulate payment failed: ${err.message || String(err)}`);
+      setActionError(`Simulate payment failed: ${err.message || String(err)}`);
     } finally {
       setActionLoading(null);
     }
@@ -112,7 +122,7 @@ export default function OpportunityDetailPage({
     if (actionLoading) return;
     setActionLoading("reject");
     setStatusMessage(null);
-    setError(null);
+    setActionError(null);
     try {
       let targetCampaignId = campaign?.id;
 
@@ -138,7 +148,7 @@ export default function OpportunityDetailPage({
         `Recovery campaign rejected. Status: ${rejected.status}. Decision recorded in audit trail.`,
       );
     } catch (err: any) {
-      setError(`Rejection failed: ${err.message || String(err)}`);
+      setActionError(`Rejection failed: ${err.message || String(err)}`);
     } finally {
       setActionLoading(null);
     }
@@ -170,6 +180,11 @@ export default function OpportunityDetailPage({
   }
 
   const confidenceLabel = opp.recovery_probability >= 0.7 ? "HIGH" : opp.recovery_probability >= 0.4 ? "MEDIUM" : "LOW";
+  // create_campaign (backend) rejects any campaign whose only candidate has
+  // a non-executable recommendation with a 422 -- checking this client-side
+  // is what prevents that confusing error rather than fixing anything about
+  // the backend's (correct) fail-closed behavior.
+  const isExecutable = opp.recommended_action === EXECUTABLE_ACTION;
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -195,13 +210,13 @@ export default function OpportunityDetailPage({
               PAY_{opp.payment_id.slice(0, 12)}
             </h1>
             <p className="mt-1 text-xs text-slate-500">
-              Customer: <span className="font-mono text-slate-800 font-semibold">{opp.customer_id ? `C-${opp.customer_id.slice(0, 8)}` : "C-10291"}</span> &middot; Method: <span className="font-semibold text-slate-800">{opp.payment_method}</span> &middot; Failure Category: <span className="font-semibold text-slate-800">{opp.failure_category ?? "TIMEOUT"}</span> &middot; Failed at {formatDateTime(opp.created_at)}
+              Customer: <span className="font-mono text-slate-800 font-semibold">{opp.customer_id ? `C-${opp.customer_id.slice(0, 8)}` : "—"}</span> &middot; Method: <span className="font-semibold text-slate-800">{opp.payment_method}</span> &middot; Failure Category: <span className="font-semibold text-slate-800">{opp.failure_category ?? "—"}</span> &middot; Failed at {formatDateTime(opp.created_at)}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-              Model: {opp.model_name || "lightgbm"} (v{opp.model_version || "1.0"})
+              Model: {opp.model_name || "—"}{opp.model_version ? ` (v${opp.model_version})` : ""}
             </span>
           </div>
         </div>
@@ -296,20 +311,7 @@ export default function OpportunityDetailPage({
                 ))}
               </div>
             ) : (
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
-                  <span className="font-mono text-slate-800 font-medium">customer_historical_success_rate</span>
-                  <span className="font-semibold text-emerald-700">+0.342 SHAP</span>
-                </div>
-                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
-                  <span className="font-mono text-slate-800 font-medium">failure_category_recoverability</span>
-                  <span className="font-semibold text-emerald-700">+0.281 SHAP</span>
-                </div>
-                <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-100">
-                  <span className="font-mono text-slate-800 font-medium">attempt_count_last_24h</span>
-                  <span className="font-semibold text-emerald-700">+0.115 SHAP</span>
-                </div>
-              </div>
+              <p className="text-xs text-slate-500">No factor attribution returned by the backend for this prediction.</p>
             )}
           </div>
         </div>
@@ -357,12 +359,13 @@ export default function OpportunityDetailPage({
           </div>
         </div>
 
-        {/* Policy Check Component */}
+        {/* Policy Check Component -- both rules are derived from real
+            backend fields (segment, recommended_action), never hardcoded. */}
         <PolicyCheck
-          amount={opp.amount}
           recoveryProbability={opp.recovery_probability}
-          actionAllowed={true}
-          contactFrequencySatisfied={true}
+          meetsRecoveryThreshold={opp.segment !== "LOW_RECOVERY"}
+          recommendedAction={opp.recommended_action}
+          isExecutable={isExecutable}
         />
       </div>
 
@@ -377,16 +380,24 @@ export default function OpportunityDetailPage({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Reject calls POST /api/recovery/campaigns/{id}/reject — real backend record */}
+            {/* Reject calls POST /api/recovery/campaigns/{id}/reject — real backend record.
+                Disabled when non-executable: creating a campaign at all (a
+                prerequisite even for rejecting one) is rejected by the
+                backend for a recommendation the current provider can't act
+                on -- see isExecutable above. */}
             <button
               onClick={handleReject}
-              disabled={!!actionLoading || campaign?.status === "REJECTED" || campaign?.status === "COMPLETED"}
+              disabled={!!actionLoading || !isExecutable || campaign?.status === "REJECTED" || campaign?.status === "COMPLETED"}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
             >
               {actionLoading === "reject" ? "Rejecting..." : "Reject Recovery"}
             </button>
 
-            {!campaign || campaign.status === "PENDING_APPROVAL" ? (
+            {!isExecutable && !campaign ? (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800 border border-amber-200">
+                <AlertTriangle className="h-4 w-4" /> Not auto-executable — requires manual handling
+              </span>
+            ) : !campaign || campaign.status === "PENDING_APPROVAL" ? (
               <button
                 onClick={handleApproveAndExecute}
                 disabled={actionLoading === "approve"}
@@ -420,9 +431,23 @@ export default function OpportunityDetailPage({
           </div>
         </div>
 
+        {!isExecutable && !campaign && (
+          <p className="text-2xs text-slate-500">
+            RecoverAI recommends <strong>{opp.recommended_action ? opp.recommended_action.replace(/_/g, " ").toLowerCase() : "manual review"}</strong> for
+            this payment. Only Payment Link recommendations can be auto-dispatched by the current provider
+            integration — this one needs to be actioned outside RecoverAI's automated workflow.
+          </p>
+        )}
+
         {statusMessage && (
           <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-3 text-xs font-semibold text-indigo-800">
             {statusMessage}
+          </div>
+        )}
+
+        {actionError && (
+          <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-800">
+            {actionError}
           </div>
         )}
       </div>

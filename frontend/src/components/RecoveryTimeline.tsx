@@ -45,7 +45,7 @@ export function RecoveryTimeline({
       title: "ML recovery probability calculated",
       timestamp: createdAt ?? new Date().toISOString(),
       status: "COMPLETED",
-      detail: "Scored by LightGBM model with SHAP factor extraction",
+      detail: "Scored by the trained recovery-prediction model with SHAP factor extraction",
     },
     {
       id: "4",

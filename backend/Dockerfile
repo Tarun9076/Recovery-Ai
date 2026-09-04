@@ -20,4 +20,7 @@ WORKDIR /app/backend
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec-form CMD) so ${PORT} expands -- platforms like
+# Railway assign a dynamic port via that env var; it defaults to 8000
+# (unchanged) for plain `docker run`/docker-compose where PORT is unset.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -1,48 +1,41 @@
 import React from "react";
 import { CheckCircle2, XCircle, ShieldCheck, AlertCircle } from "lucide-react";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatPercent } from "@/lib/format";
 
+// Only two checks are shown here, and both are backed by real fields the
+// backend already computed for this exact opportunity (RecoverySegment /
+// RecoveryActionSelector) -- no fabricated thresholds or hardcoded "always
+// passing" checks. A per-transaction amount cap and a live contact-frequency
+// result don't exist as real, fetchable values on this endpoint, so rather
+// than invent a threshold or default a check to "passed", those two rows are
+// left out entirely.
 interface PolicyCheckProps {
-  amount: number;
-  maxAmountLimit?: number;
   recoveryProbability: number;
-  minProbabilityThreshold?: number;
-  actionAllowed?: boolean;
-  contactFrequencySatisfied?: boolean;
+  meetsRecoveryThreshold: boolean;
+  recommendedAction?: string;
+  isExecutable: boolean;
 }
 
 export function PolicyCheck({
-  amount,
-  maxAmountLimit = 500000,
   recoveryProbability,
-  minProbabilityThreshold = 0.40,
-  actionAllowed = true,
-  contactFrequencySatisfied = true,
+  meetsRecoveryThreshold,
+  recommendedAction,
+  isExecutable,
 }: PolicyCheckProps) {
-  const isAmountValid = amount <= maxAmountLimit;
-  const isProbabilityValid = recoveryProbability >= minProbabilityThreshold;
-  const allPassed = isAmountValid && isProbabilityValid && actionAllowed && contactFrequencySatisfied;
+  const allPassed = meetsRecoveryThreshold && isExecutable;
 
   const rules = [
     {
-      label: `Amount within merchant safety limit (Max ${formatCurrency(maxAmountLimit)})`,
-      passed: isAmountValid,
-      detail: `Transaction amount ${formatCurrency(amount)}`,
-    },
-    {
-      label: `Recovery probability meets minimum threshold (${formatPercent(minProbabilityThreshold)})`,
-      passed: isProbabilityValid,
+      label: "Recovery probability meets merchant's minimum threshold",
+      passed: meetsRecoveryThreshold,
       detail: `Model probability ${formatPercent(recoveryProbability)}`,
     },
     {
-      label: "Recovery action type allowed by policy",
-      passed: actionAllowed,
-      detail: "Automated Payment Link dispatch authorized",
-    },
-    {
-      label: "Customer contact frequency limit satisfied",
-      passed: contactFrequencySatisfied,
-      detail: "No previous outreach in last 24h",
+      label: "Recommended action is auto-executable by the current provider",
+      passed: isExecutable,
+      detail: isExecutable
+        ? "Payment Link -- dispatched automatically on approval"
+        : `${recommendedAction ?? "This recommendation"} requires handling outside the automated Payment Link workflow`,
     },
   ];
 

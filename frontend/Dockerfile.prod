@@ -1,0 +1,25 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, so
+# this must be a build ARG (passed via `docker build --build-arg`, or by a
+# platform that exposes its service variables during the image build --
+# e.g. Railway), not just a runtime ENV on the container.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+RUN npm run build
+
+EXPOSE 3000
+
+# Shell form so ${PORT} expands -- Railway assigns a dynamic port via that
+# env var; defaults to 3000 if unset.
+CMD npm start -- -p ${PORT:-3000}
