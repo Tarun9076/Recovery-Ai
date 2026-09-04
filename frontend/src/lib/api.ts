@@ -385,6 +385,17 @@ export async function postExecuteCampaign(id: string): Promise<CampaignDetail> {
   return apiFetch<CampaignDetail>(`/api/recovery/campaigns/${id}/execute`, { method: "POST" });
 }
 
+export async function postRejectCampaign(
+  id: string,
+  rejectedBy = "merchant",
+  reason = "Merchant rejected recovery action",
+): Promise<CampaignDetail> {
+  return apiFetch<CampaignDetail>(`/api/recovery/campaigns/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ rejected_by: rejectedBy, reason }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mock provider / demo controls
 // ---------------------------------------------------------------------------

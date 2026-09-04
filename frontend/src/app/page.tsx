@@ -1,4 +1,3 @@
-import Link from "react";
 import NextLink from "next/link";
 import {
   getDashboardSummary,
@@ -13,7 +12,6 @@ import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { KPICard } from "@/components/KPICard";
 import { AIInsightCard } from "@/components/AIInsightCard";
 import { FailureTrendChart } from "@/components/FailureTrendChart";
-import { StatusBadge } from "@/components/StatusBadge";
 import {
   DollarSign,
   TrendingUp,
@@ -27,6 +25,10 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+
+function formatAction(value: string): string {
+  return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default async function Home() {
   let summary: DashboardSummary | null = null;
@@ -55,6 +57,20 @@ export default async function Home() {
   } catch (err) {
     error = "Could not reach the RecoverAI API backend. Ensure the backend server is running.";
   }
+
+  // Real data derived from the fetched summary/opportunities above -- not
+  // invented text. Picks the largest failure category and the most common
+  // real backend recommendation among the fetched high-recovery candidates.
+  const topFailureCategory = summary?.failure_category_breakdown.length
+    ? [...summary.failure_category_breakdown].sort((a, b) => b.count - a.count)[0]
+    : null;
+
+  const actionCounts = new Map<string, number>();
+  for (const opp of opportunities) {
+    if (!opp.recommended_action) continue;
+    actionCounts.set(opp.recommended_action, (actionCounts.get(opp.recommended_action) ?? 0) + 1);
+  }
+  const topRecommendedAction = [...actionCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -132,17 +148,22 @@ export default async function Home() {
             />
           </section>
 
-          {/* PROMINENT AI ALERT / OPPORTUNITY CARD */}
-          <section>
-            <AIInsightCard
-              anomalyTitle="UPI & Gateway Failure Spike Detected"
-              revenueAtRisk={metrics.revenue_at_risk}
-              recoverableRevenue={metrics.recoverable_revenue}
-              affectedPayments={summary.failed_payments}
-              likelyCause="Temporary UPI bank infrastructure degradation & session timeout"
-              recommendedAction="Automated Payment Link retry for high-intent customers"
-            />
-          </section>
+          {/* PROMINENT AI ALERT / OPPORTUNITY CARD -- every field below is
+              derived from data already fetched from the backend above
+              (summary.failure_category_breakdown, metrics, opportunities),
+              never invented text (spec: no fabricated AI findings). */}
+          {topFailureCategory && (
+            <section>
+              <AIInsightCard
+                anomalyTitle={`${formatAction(topFailureCategory.failure_category)} failures are the top driver of revenue at risk`}
+                revenueAtRisk={metrics.revenue_at_risk}
+                recoverableRevenue={metrics.recoverable_revenue}
+                affectedPayments={topFailureCategory.count}
+                likelyCause={`${formatNumber(topFailureCategory.count)} failed payments were categorized as ${formatAction(topFailureCategory.failure_category)} -- the largest failure category in the current dataset window`}
+                recommendedAction={topRecommendedAction ? formatAction(topRecommendedAction) : "See per-payment recommendations below"}
+              />
+            </section>
+          )}
 
           {/* REVENUE RISK & RECOVERY CHART */}
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
@@ -197,7 +218,6 @@ export default async function Home() {
                     <th className="py-3 px-3">Recovery Probability</th>
                     <th className="py-3 px-3">Failure Reason</th>
                     <th className="py-3 px-3">Recommended Action</th>
-                    <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -205,7 +225,7 @@ export default async function Home() {
                   {opportunities.map((opp) => (
                     <tr key={opp.payment_id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3 px-3 font-mono text-slate-600">
-                        {opp.customer_id ? `C-${opp.customer_id.slice(0, 6)}` : "C-10291"}
+                        {opp.customer_id ? `C-${opp.customer_id.slice(0, 6)}` : "—"}
                       </td>
                       <td className="py-3 px-3 font-mono text-slate-900 font-semibold">
                         PAY_{opp.payment_id.slice(0, 8)}
@@ -219,7 +239,7 @@ export default async function Home() {
                         </span>
                       </td>
                       <td className="py-3 px-3 text-slate-600">
-                        {opp.failure_category ?? "TIMEOUT"}
+                        {opp.failure_category ?? "—"}
                       </td>
                       <td className="py-3 px-3 text-slate-800 font-semibold">
                         {/* Always the backend's own decision (RecoveryActionSelector) --
@@ -227,12 +247,7 @@ export default async function Home() {
                             alternative-method suggestion, a defer, a manual-review flag,
                             etc. all come from the same real per-payment policy decision
                             the campaign workflow itself would use. */}
-                        {opp.recommended_action
-                          ? opp.recommended_action.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
-                          : "—"}
-                      </td>
-                      <td className="py-3 px-3">
-                        <StatusBadge status="AWAITING_APPROVAL" />
+                        {opp.recommended_action ? formatAction(opp.recommended_action) : "—"}
                       </td>
                       <td className="py-3 px-3 text-right">
                         <NextLink
@@ -297,36 +312,19 @@ export default async function Home() {
                     <tr className="bg-slate-50 text-2xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="py-2.5 px-4">Failure Type</th>
                       <th className="py-2.5 px-4">Failed Payments</th>
-                      <th className="py-2.5 px-4">Revenue Impact</th>
-                      <th className="py-2.5 px-4">Recovery Potential</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
-                    {summary.failure_category_breakdown.map((row, idx) => {
-                      const potential =
-                        row.failure_category.includes("UPI") || row.failure_category.includes("TIMEOUT")
-                          ? "HIGH"
-                          : row.failure_category.includes("NETWORK")
-                          ? "MEDIUM"
-                          : "LOW";
-
-                      return (
-                        <tr key={row.failure_category} className="hover:bg-slate-50/50">
-                          <td className="py-2.5 px-4 font-mono font-bold text-slate-800">
-                            {row.failure_category}
-                          </td>
-                          <td className="py-2.5 px-4 text-slate-700">
-                            {formatNumber(row.count)}
-                          </td>
-                          <td className="py-2.5 px-4 text-rose-600 font-semibold">
-                            {formatCurrency(row.count * 1500)}
-                          </td>
-                          <td className="py-2.5 px-4">
-                            <StatusBadge status={`${potential}_RECOVERY`} />
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {summary.failure_category_breakdown.map((row) => (
+                      <tr key={row.failure_category} className="hover:bg-slate-50/50">
+                        <td className="py-2.5 px-4 font-mono font-bold text-slate-800">
+                          {row.failure_category}
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-700">
+                          {formatNumber(row.count)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

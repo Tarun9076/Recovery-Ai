@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CampaignDetailView } from "@/components/CampaignDetailView";
+import { FailureRecoverySimulator } from "@/components/FailureRecoverySimulator";
 import {
   getHighRecoveryOpportunities,
   postApproveCampaign,
@@ -10,7 +11,6 @@ import {
   postInvestigate,
   postResetDemo,
   postSimulatePayment,
-  postSimulateProviderFailure,
   getCampaign,
   type CampaignDetail,
   type InvestigateResponse,
@@ -20,19 +20,13 @@ import {
 import { formatCurrency, formatDateTime, formatPercent } from "@/lib/format";
 import {
   Sparkles,
-  Zap,
-  Play,
   CheckCircle2,
-  AlertTriangle,
   RotateCcw,
-  ShieldCheck,
-  ArrowRight,
-  Clock,
   Activity,
   ChevronRight,
-  Send,
   XCircle,
-  Lock,
+  Webhook,
+  Loader2,
 } from "lucide-react";
 
 interface LogEntry {
@@ -159,6 +153,131 @@ function WorkflowPipelineVisualizer({ activeStep }: { activeStep: number }) {
   );
 }
 
+/** Every value here is read straight off the real candidate/campaign/action
+ * state already fetched from the backend -- nothing is invented. This is
+ * what makes DISPATCHED vs RECOVERED visible: recoveredRevenue only becomes
+ * non-zero once `executedAction.recovered_amount` is set, which only ever
+ * happens inside webhook_service.py after signature verification. */
+function RecoveryStatusPanel({
+  candidate,
+  currentStatus,
+  recoveredRevenue,
+  customerPaymentState,
+  webhookState,
+}: {
+  candidate?: RecoveryOpportunity;
+  currentStatus: string;
+  recoveredRevenue: number;
+  customerPaymentState: string;
+  webhookState: string;
+}) {
+  const statusStyles: Record<string, string> = {
+    "FAILED PAYMENT": "bg-rose-50 text-rose-700 border-rose-200",
+    "AWAITING APPROVAL": "bg-amber-50 text-amber-700 border-amber-200",
+    APPROVED: "bg-blue-50 text-blue-700 border-blue-200",
+    DISPATCHED: "bg-amber-50 text-amber-700 border-amber-200",
+    RECOVERED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  };
+  const badgeClass = statusStyles[currentStatus] ?? "bg-slate-100 text-slate-600 border-slate-200";
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+      {candidate && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-2xs sm:grid-cols-3">
+          <div>
+            <p className="font-semibold text-slate-500">Payment</p>
+            <p className="font-mono font-bold text-slate-900">PAY_{candidate.payment_id.slice(0, 8)}</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-500">Amount</p>
+            <p className="font-bold text-slate-900">{formatCurrency(candidate.amount)}</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-500">Failure Reason</p>
+            <p className="font-bold text-slate-900">{candidate.failure_category ?? "—"}</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-500">Recovery Probability</p>
+            <p className="font-bold text-slate-900">{formatPercent(candidate.recovery_probability)}</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-500">Recommended Action</p>
+            <p className="font-bold text-slate-900">{formatAction(candidate.recommended_action)}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-4 border-t border-slate-200 pt-3 text-2xs">
+        <div>
+          <p className="font-semibold text-slate-500">Current Recovery Status</p>
+          <span className={`mt-1 inline-flex items-center rounded-full border px-2.5 py-0.5 text-2xs font-bold ${badgeClass}`}>
+            {currentStatus}
+          </span>
+        </div>
+        <div>
+          <p className="font-semibold text-slate-500">Recovered Revenue</p>
+          <p className={`mt-1 font-bold ${recoveredRevenue > 0 ? "text-emerald-700" : "text-slate-900"}`}>
+            {formatCurrency(recoveredRevenue)}
+          </p>
+        </div>
+        <div>
+          <p className="font-semibold text-slate-500">Customer Payment</p>
+          <p className="mt-1 font-bold text-slate-900">{customerPaymentState}</p>
+        </div>
+        <div>
+          <p className="font-semibold text-slate-500">Webhook</p>
+          <p className="mt-1 font-bold text-slate-900">{webhookState}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const WEBHOOK_CHECKLIST_STEPS = [
+  "Triggering payment webhook",
+  "Webhook received",
+  "Verifying signature",
+  "Confirming payment",
+  "Updating recovery",
+] as const;
+
+/** Every checklist item reflects one atomic, already-verified backend
+ * response -- there is no per-step polling, so "processing" shows only the
+ * first item in flight, and the response (success or a real error) decides
+ * whether the rest ever get shown as done. Nothing here is faked ahead of
+ * the actual API call resolving. */
+function WebhookProcessingChecklist({ phase, error }: { phase: "processing" | "done" | "error"; error?: string | null }) {
+  const doneCount = phase === "processing" ? 1 : phase === "done" ? WEBHOOK_CHECKLIST_STEPS.length : 1;
+
+  return (
+    <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4 space-y-2">
+      <p className="text-2xs font-bold uppercase tracking-wider text-indigo-700">Webhook Processing</p>
+      {WEBHOOK_CHECKLIST_STEPS.map((step, idx) => {
+        const isDone = idx < doneCount;
+        const isCurrent = phase === "processing" && idx === 0;
+        const isFailedStep = phase === "error" && idx === 0;
+        return (
+          <div key={step} className="flex items-center gap-2 text-xs">
+            {isFailedStep ? (
+              <XCircle className="h-3.5 w-3.5 text-rose-600" />
+            ) : isDone ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+            ) : isCurrent ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+            ) : (
+              <span className="h-3.5 w-3.5 rounded-full border border-slate-300" />
+            )}
+            <span className={isDone ? "text-slate-800 font-medium" : "text-slate-400"}>{step}</span>
+          </div>
+        );
+      })}
+      {phase === "error" && error && (
+        <p className="mt-1 text-2xs font-semibold text-rose-700">Webhook rejected: {error}</p>
+      )}
+    </div>
+  );
+}
+
 export function DemoControlPanel({ initialCandidates }: { initialCandidates: RecoveryOpportunity[] }) {
   const [candidates, setCandidates] = useState(initialCandidates);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
@@ -171,9 +290,8 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
   const [selectedPaymentId, setSelectedPaymentId] = useState(initialCandidates[0]?.payment_id ?? "");
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [simResult, setSimResult] = useState<SimulatePaymentResult | null>(null);
-
-  const [failurePaymentId, setFailurePaymentId] = useState("");
-  const [failureCampaign, setFailureCampaign] = useState<CampaignDetail | null>(null);
+  const [webhookPhase, setWebhookPhase] = useState<"idle" | "processing" | "done" | "error">("idle");
+  const [webhookError, setWebhookError] = useState<string | null>(null);
 
   function pushLog(label: string, ok: boolean, detail: string) {
     setLog((prev) => [
@@ -196,7 +314,60 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
     }
   }
 
-  const executedAction = campaign?.actions.find((a) => a.status === "EXECUTED" || a.status === "AUTHORIZED");
+  const executedAction = campaign?.actions.find(
+    (a) => a.status === "EXECUTED" || a.status === "AUTHORIZED" || a.status === "RECOVERED",
+  );
+  const isRecovered = executedAction?.status === "RECOVERED";
+  const selectedCandidate = candidates.find((c) => c.payment_id === selectedPaymentId);
+
+  // Every branch reads real fetched state (campaign.status / executedAction.status) --
+  // nothing here is a guess. This is the DISPATCHED != RECOVERED distinction made explicit.
+  const currentRecoveryStatus = !campaign
+    ? "FAILED PAYMENT"
+    : isRecovered
+    ? "RECOVERED"
+    : executedAction
+    ? "DISPATCHED"
+    : campaign.status === "PENDING_APPROVAL"
+    ? "AWAITING APPROVAL"
+    : campaign.status === "APPROVED"
+    ? "APPROVED"
+    : campaign.status;
+  const recoveredRevenue = executedAction?.recovered_amount ?? 0;
+  const customerPaymentState = isRecovered ? "PAID" : executedAction ? "WAITING" : "—";
+  const webhookState = isRecovered ? "VERIFIED" : executedAction ? "WAITING" : "—";
+
+  async function triggerWebhook() {
+    if (!executedAction || !campaign) return;
+    setWebhookPhase("processing");
+    setWebhookError(null);
+    setLoadingKey("simulate-payment");
+    try {
+      // The ONLY call made here is the real backend endpoint that self-signs
+      // a payment_link.paid payload and runs it through the exact same
+      // process_razorpay_webhook signature-verification pipeline a genuine
+      // Razorpay delivery goes through (see mock_service.py). No frontend
+      // state is ever set to "recovered" independently of this response.
+      const result = await postSimulatePayment(executedAction.id);
+      const refreshed = await getCampaign(campaign.id);
+      setSimResult(result);
+      setCampaign(refreshed);
+      setActiveStepNum(6);
+      setWebhookPhase("done");
+      pushLog(
+        "Trigger Payment Webhook",
+        true,
+        `Webhook verified: ${result.status}${result.amount_paid ? ` -- ${formatCurrency(result.amount_paid)} paid` : ""}.`,
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setWebhookPhase("error");
+      setWebhookError(message);
+      pushLog("Trigger Payment Webhook", false, message);
+    } finally {
+      setLoadingKey(null);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -222,8 +393,8 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
                 setInvestigation(null);
                 setCampaign(null);
                 setSimResult(null);
-                setFailureCampaign(null);
-                setFailurePaymentId("");
+                setWebhookPhase("idle");
+                setWebhookError(null);
                 setActiveStepNum(1);
                 getHighRecoveryOpportunities(15)
                   .then((res) => {
@@ -322,7 +493,15 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
           label="Select Target Failed Payment"
         />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <RecoveryStatusPanel
+          candidate={selectedCandidate}
+          currentStatus={currentRecoveryStatus}
+          recoveredRevenue={recoveredRevenue}
+          customerPaymentState={customerPaymentState}
+          webhookState={webhookState}
+        />
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* 02 GENERATE */}
           <button
             disabled={loadingKey === "create" || !selectedPaymentId}
@@ -337,6 +516,8 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
                 (detail) => {
                   setCampaign(detail);
                   setSimResult(null);
+                  setWebhookPhase("idle");
+                  setWebhookError(null);
                   setActiveStepNum(3);
                   return `Campaign ${detail.id.slice(0, 8)} created -- ${formatCurrency(detail.expected_recovery)} expected recovery.`;
                 },
@@ -404,40 +585,44 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
               Dispatch Link <ChevronRight className="h-3 w-3" />
             </span>
           </button>
-
-          {/* 05 VERIFY */}
-          <button
-            disabled={loadingKey === "simulate-payment" || !executedAction}
-            onClick={() =>
-              run(
-                "simulate-payment",
-                "Simulate Customer Payment",
-                async () => {
-                  const result = await postSimulatePayment(executedAction!.id);
-                  const refreshed = await getCampaign(campaign!.id);
-                  return { result, refreshed };
-                },
-                ({ result, refreshed }) => {
-                  setSimResult(result);
-                  setCampaign(refreshed);
-                  setActiveStepNum(6);
-                  return `Webhook verified: ${result.status}${result.amount_paid ? ` -- ${formatCurrency(result.amount_paid)} paid` : ""}.`;
-                },
-              )
-            }
-            className="flex flex-col items-start justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5 hover:bg-white hover:border-emerald-300 transition-all text-left disabled:opacity-40"
-          >
-            <div>
-              <span className="text-2xs font-mono font-bold uppercase text-emerald-600">05. VERIFY</span>
-              <p className="text-xs font-bold text-slate-900 mt-0.5">Verify Webhook</p>
-            </div>
-            <span className="mt-3 text-2xs text-emerald-600 font-semibold flex items-center gap-1">
-              Confirm Payment <ChevronRight className="h-3 w-3" />
-            </span>
-          </button>
         </div>
 
-        {simResult && (
+        {/* STEP 5: MANUAL WEBHOOK TRIGGER -- only ever shown between dispatch
+            and confirmed recovery, and never after the action is already
+            RECOVERED. Clicking it calls the real backend endpoint below;
+            nothing here sets any "recovered" state directly. */}
+        {executedAction && !isRecovered && (
+          <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-5 space-y-3">
+            <div>
+              <span className="text-2xs font-mono font-bold uppercase text-indigo-700">05. VERIFY &middot; NEXT STEP</span>
+              <p className="mt-1 text-sm font-bold text-slate-900">
+                Recovery action dispatched. Revenue will only be recorded after a verified payment webhook.
+              </p>
+              <p className="mt-0.5 text-2xs text-slate-600">
+                Manually trigger the payment webhook to simulate the customer successfully completing the payment.
+                This calls the real <code className="font-mono">/api/mock/simulate-payment</code> endpoint, which is
+                verified through the same signature-checked webhook pipeline a genuine Razorpay delivery uses.
+              </p>
+            </div>
+
+            <button
+              disabled={loadingKey === "simulate-payment"}
+              onClick={triggerWebhook}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 transition-all"
+            >
+              {loadingKey === "simulate-payment" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Webhook className="h-4 w-4" />
+              )}
+              Trigger Payment Webhook
+            </button>
+
+            {webhookPhase !== "idle" && <WebhookProcessingChecklist phase={webhookPhase} error={webhookError} />}
+          </div>
+        )}
+
+        {isRecovered && simResult && (
           <div className="rounded-lg bg-emerald-50 p-3 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             Webhook verified: <strong>{simResult.status}</strong> — {simResult.amount_paid ? `${formatCurrency(simResult.amount_paid)} confirmed paid.` : ""}
@@ -451,59 +636,10 @@ export function DemoControlPanel({ initialCandidates }: { initialCandidates: Rec
         )}
       </div>
 
-      {/* FAILURE RECOVERY TEST (PROMINENT SANDBOX) */}
-      <div className="rounded-xl border border-rose-200 bg-gradient-to-r from-rose-900 via-slate-900 to-rose-950 p-6 text-white shadow-md">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-rose-500/20 pb-4">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/20 px-3 py-1 text-xs font-bold text-rose-200 border border-rose-400/30">
-              <ShieldCheck className="h-3.5 w-3.5 text-rose-300" /> FAIL-SAFE BEHAVIOR SANDBOX
-            </span>
-            <h3 className="mt-2 text-xl font-bold text-white">Failure Recovery Test</h3>
-            <p className="mt-0.5 text-xs text-slate-300 max-w-xl">
-              Simulate a provider gateway timeout and verify that RecoverAI never falsely records unverified revenue as recovered.
-            </p>
-          </div>
-
-          <button
-            disabled={loadingKey === "provider-failure"}
-            onClick={() =>
-              run(
-                "provider-failure",
-                "Simulate Provider Failure",
-                () => postSimulateProviderFailure(failurePaymentId || undefined),
-                (detail) => {
-                  setFailureCampaign(detail);
-                  return `Provider failure simulated. Status: ${detail.status} -- ₹0 recorded as recovered. Idempotency preserved.`;
-                },
-              )
-            }
-            className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-500 disabled:opacity-40 transition-all"
-          >
-            {loadingKey === "provider-failure" ? <RotateCcw className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
-            Simulate Provider Timeout Failure
-          </button>
-        </div>
-
-        {/* FAIL-SAFE WORKFLOW PIPELINE VISUALIZER */}
-        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7 text-2xs font-mono font-bold text-center">
-          <div className="p-2 rounded bg-rose-500/20 border border-rose-400/30 text-rose-200">PROVIDER TIMEOUT</div>
-          <div className="p-2 rounded bg-rose-500/20 border border-rose-400/30 text-rose-200">FAILED / PENDING</div>
-          <div className="p-2 rounded bg-emerald-500/20 border border-emerald-400/30 text-emerald-300">₹0 RECOVERED</div>
-          <div className="p-2 rounded bg-indigo-500/20 border border-indigo-400/30 text-indigo-200">IDEMPOTENT</div>
-          <div className="p-2 rounded bg-slate-800 border border-slate-700 text-slate-300">WAIT WEBHOOK</div>
-          <div className="p-2 rounded bg-slate-800 border border-slate-700 text-slate-300">PAYMENT CONFIRMED</div>
-          <div className="p-2 rounded bg-emerald-600 text-white">RECOVERY SUCCESS</div>
-        </div>
-
-        {failureCampaign && (
-          <div className="mt-6 pt-4 border-t border-rose-500/20 bg-white/5 rounded-lg p-4 text-slate-200 text-xs">
-            <p className="font-bold text-rose-300">Failure Simulation Result Verified:</p>
-            <p className="mt-1 text-2xs text-slate-300">
-              Campaign ID: {failureCampaign.id} &middot; Status: <strong className="text-rose-400">{failureCampaign.status}</strong> &middot; Revenue Recovered: <strong className="text-emerald-400">{formatCurrency(failureCampaign.revenue_recovered)}</strong>
-            </p>
-          </div>
-        )}
-      </div>
+      {/* FAILURE -> RECOVERY SIMULATION -- a full interactive walkthrough of
+          the failure-handling lifecycle, entirely backend-driven. Replaces
+          the old single-card provider-timeout sandbox. */}
+      <FailureRecoverySimulator candidates={candidates} />
 
       {/* ACTIVITY LOG TIMELINE */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">

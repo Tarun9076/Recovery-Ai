@@ -10,6 +10,7 @@ import {
   postApproveCampaign,
   postExecuteCampaign,
   postSimulatePayment,
+  postRejectCampaign,
   type RecoveryOpportunityDetail,
   type CampaignDetail,
 } from "@/lib/api";
@@ -108,7 +109,39 @@ export default function OpportunityDetailPage({
   }
 
   async function handleReject() {
-    setStatusMessage("Recovery opportunity rejected by merchant. Policy decision logged.");
+    if (actionLoading) return;
+    setActionLoading("reject");
+    setStatusMessage(null);
+    setError(null);
+    try {
+      let targetCampaignId = campaign?.id;
+
+      // If no campaign exists yet, create one so we can reject it — this
+      // records the merchant's explicit rejection decision in the backend
+      // audit trail rather than silently discarding the opportunity.
+      if (!targetCampaignId) {
+        if (!opp) return;
+        const created = await postCreateCampaign(
+          [opp.payment_id],
+          `Recovery for PAY_${opp.payment_id.slice(0, 8)}`,
+        );
+        targetCampaignId = created.campaign.id;
+      }
+
+      const rejected = await postRejectCampaign(
+        targetCampaignId,
+        "merchant",
+        "Merchant declined recovery action via dashboard",
+      );
+      setCampaign(rejected);
+      setStatusMessage(
+        `Recovery campaign rejected. Status: ${rejected.status}. Decision recorded in audit trail.`,
+      );
+    } catch (err: any) {
+      setError(`Rejection failed: ${err.message || String(err)}`);
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   if (loading) {
@@ -148,7 +181,7 @@ export default function OpportunityDetailPage({
         >
           <ArrowLeft className="h-4 w-4" /> Back to AI Recovery Opportunities
         </Link>
-        <StatusBadge status={campaign?.status ?? "AWAITING_APPROVAL"} />
+        <StatusBadge status={campaign?.status ?? "PENDING"} />
       </div>
 
       {/* HEADER CARD */}
@@ -231,37 +264,20 @@ export default function OpportunityDetailPage({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Root Cause & Rationale */}
+          {/* Root Cause & Rationale — sourced from backend RecoveryActionSelector */}
           <div className="space-y-4">
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Root Cause</h4>
-              <p className="mt-1 text-sm font-semibold text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                {opp.failure_category === "UPI_FAILURE" || opp.failure_category === "TIMEOUT"
-                  ? "Temporary payment gateway timeout & UPI session degradation"
-                  : "Bank authorization timeout during peak traffic window"}
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Failure Category</h4>
+              <p className="mt-1 text-sm font-mono font-semibold text-slate-900 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                {opp.failure_category ?? "Unknown"}
               </p>
             </div>
 
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Why Recoverable</h4>
-              <ul className="mt-2 space-y-2 text-xs text-slate-700">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>Customer has <strong>strong historical payment success</strong> record</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>Failure category (<code className="text-indigo-700">{opp.failure_category ?? "TIMEOUT"}</code>) has high historical recovery rate</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>Customer attempted payment twice, proving strong purchase intent</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>No card fraud or permanent account suspension flags</span>
-                </li>
-              </ul>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">AI Rationale (from backend)</h4>
+              <p className="mt-1 text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200 leading-relaxed">
+                {opp.reason ?? "No rationale provided by the backend action selector."}
+              </p>
             </div>
           </div>
 
@@ -316,16 +332,26 @@ export default function OpportunityDetailPage({
 
             <div className="mt-4 space-y-3 text-xs sm:text-sm">
               <div>
-                <span className="text-2xs font-bold uppercase text-slate-400">Action</span>
-                <p className="font-bold text-slate-900 text-base">Generate Recovery Payment Link</p>
+                <span className="text-2xs font-bold uppercase text-slate-400">Action (from backend)</span>
+                {/* opp.recommended_action comes from RecoveryActionSelector — the same
+                    engine campaign_service uses. Never guessed client-side. */}
+                <p className="font-bold text-slate-900 text-base">
+                  {opp.recommended_action
+                    ? opp.recommended_action.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+                    : "—"}
+                </p>
               </div>
               <div>
                 <span className="text-2xs font-bold uppercase text-slate-400">Expected Recovery Value</span>
                 <p className="font-extrabold text-emerald-700 text-lg">{formatCurrency(opp.expected_recovery)}</p>
               </div>
               <div>
-                <span className="text-2xs font-bold uppercase text-slate-400">Reason</span>
-                <p className="text-slate-700 font-medium">High recovery probability ({formatPercent(opp.recovery_probability)}) + strong customer intent + recoverable failure type.</p>
+                <span className="text-2xs font-bold uppercase text-slate-400">Reason (from backend)</span>
+                {/* opp.reason is the policy rationale from RecoveryActionSelector.
+                    Never hardcoded — comes directly from the real per-payment decision. */}
+                <p className="text-slate-700 font-medium">
+                  {opp.reason ?? "No rationale returned by the backend."}
+                </p>
               </div>
             </div>
           </div>
@@ -351,12 +377,13 @@ export default function OpportunityDetailPage({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Reject calls POST /api/recovery/campaigns/{id}/reject — real backend record */}
             <button
               onClick={handleReject}
-              disabled={!!actionLoading || campaign?.status === "COMPLETED"}
+              disabled={!!actionLoading || campaign?.status === "REJECTED" || campaign?.status === "COMPLETED"}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
             >
-              Reject Recovery
+              {actionLoading === "reject" ? "Rejecting..." : "Reject Recovery"}
             </button>
 
             {!campaign || campaign.status === "PENDING_APPROVAL" ? (

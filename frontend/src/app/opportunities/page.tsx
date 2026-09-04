@@ -10,7 +10,6 @@ import {
   type RecoveryMetricsRead,
 } from "@/lib/api";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
-import { StatusBadge } from "@/components/StatusBadge";
 import { KPICard } from "@/components/KPICard";
 import {
   Layers,
@@ -19,7 +18,6 @@ import {
   ArrowUpRight,
   Sparkles,
   CheckCircle,
-  Clock,
   RefreshCw,
   Zap,
   Play,
@@ -171,13 +169,6 @@ export default function OpportunitiesPage() {
           highlight
         />
         <KPICard
-          title="Awaiting Approval"
-          value={formatNumber(opportunities.length)}
-          subtitle="Ready for merchant sign-off"
-          icon={Clock}
-          variant="warning"
-        />
-        <KPICard
           title="Verified Recovered"
           value={formatCurrency(metrics?.revenue_recovered ?? 0)}
           subtitle="Confirmed webhook payments"
@@ -275,7 +266,6 @@ export default function OpportunitiesPage() {
                   <th className="py-3.5 px-4">Recovery Probability</th>
                   <th className="py-3.5 px-4">Expected Recovery</th>
                   <th className="py-3.5 px-4">Recommended Action</th>
-                  <th className="py-3.5 px-4">Status</th>
                   <th className="py-3.5 px-4 text-right">Review Action</th>
                 </tr>
               </thead>
@@ -283,7 +273,7 @@ export default function OpportunitiesPage() {
                 {filtered.map((opp) => (
                   <tr key={opp.payment_id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3.5 px-4 font-mono text-slate-600">
-                      {opp.customer_id ? `C-${opp.customer_id.slice(0, 6)}` : "C-10291"}
+                      {opp.customer_id ? `C-${opp.customer_id.slice(0, 6)}` : "—"}
                     </td>
                     <td className="py-3.5 px-4 font-mono text-slate-900 font-bold">
                       PAY_{opp.payment_id.slice(0, 8)}
@@ -292,7 +282,7 @@ export default function OpportunitiesPage() {
                       {formatCurrency(opp.amount)}
                     </td>
                     <td className="py-3.5 px-4 text-slate-700 font-medium">
-                      {opp.failure_category ?? "TIMEOUT"}
+                      {opp.failure_category ?? "—"}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
@@ -303,19 +293,11 @@ export default function OpportunitiesPage() {
                       {formatCurrency(opp.expected_recovery)}
                     </td>
                     <td className="py-3.5 px-4 text-slate-800 font-semibold">
-                      {(() => {
-                        if (opp.recommended_action) {
-                          return opp.recommended_action.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
-                        }
-                        const cat = opp.failure_category;
-                        if (cat === "UPI_FAILURE" || cat === "TIMEOUT" || cat === "NETWORK_ERROR") return "Retry";
-                        if (cat === "BANK_DECLINED" || cat === "CARD_DECLINED" || cat === "CARD_LIMIT") return "Alternative Payment Method";
-                        if (cat === "INSUFFICIENT_FUNDS" || cat === "AUTHENTICATION_FAILURE") return "Reminder";
-                        return "Payment Link";
-                      })()}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <StatusBadge status="AWAITING_APPROVAL" />
+                      {/* Always the backend's own decision (RecoveryActionSelector) --
+                          never guessed client-side from failure category. */}
+                      {opp.recommended_action
+                        ? opp.recommended_action.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+                        : "—"}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <Link

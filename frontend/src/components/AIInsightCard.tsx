@@ -4,22 +4,25 @@ import { Sparkles, AlertTriangle, ArrowRight, ShieldAlert, Zap } from "lucide-re
 import { formatCurrency, formatNumber } from "@/lib/format";
 
 interface AIInsightCardProps {
-  anomalyTitle?: string;
-  revenueAtRisk?: number;
-  recoverableRevenue?: number;
-  affectedPayments?: number;
-  likelyCause?: string;
-  recommendedAction?: string;
+  anomalyTitle: string;
+  revenueAtRisk: number;
+  recoverableRevenue: number;
+  affectedPayments: number;
+  likelyCause: string;
+  recommendedAction: string;
   onInvestigate?: () => void;
 }
 
+// No default prop values here on purpose: every field is real backend-derived
+// data supplied by the caller. A hardcoded default would silently render as a
+// real AI finding if a caller ever forgot to pass one.
 export function AIInsightCard({
-  anomalyTitle = "UPI Failure Spike & Gateway Timeout Detected",
-  revenueAtRisk = 17200000,
-  recoverableRevenue = 55500,
-  affectedPayments = 1694,
-  likelyCause = "Temporary UPI provider infrastructure degradation & session timeout",
-  recommendedAction = "Deploy Automated Payment Link Retry to high-intent customers",
+  anomalyTitle,
+  revenueAtRisk,
+  recoverableRevenue,
+  affectedPayments,
+  likelyCause,
+  recommendedAction,
   onInvestigate,
 }: AIInsightCardProps) {
   return (
