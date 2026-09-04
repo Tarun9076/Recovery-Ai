@@ -293,4 +293,12 @@ npx tsc --noEmit
 
 
 
-Build by - Tarun Kumar
+---
+
+<p align="center">
+  <strong>RecoverAI</strong> · Built by <strong>Tarun Kumar</strong>
+</p>
+
+<p align="center">
+  AI-powered revenue recovery — detect, decide, recover.
+</p>
