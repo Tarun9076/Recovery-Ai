@@ -37,22 +37,22 @@ RecoverAI keeps prediction, decision, and execution in separate layers so no sin
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                     Decision Layer                            │
+│                     Decision Layer                           │
 │   ML model (recovery probability) · Action Selector (policy) │
-│   · Policy Engine (merchant guardrails) · AI Agent (prose)    │
+│   · Policy Engine (merchant guardrails) · AI Agent (prose)   │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                   Execution & Verification Layer               │
-│   Campaign lifecycle · Payment Provider (Razorpay) ·           │
-│   Webhook verification · Audit log                             │
+│                   Execution & Verification Layer             │
+│   Campaign lifecycle · Payment Provider (Razorpay) ·         │
+│   Webhook verification · Audit log                           │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                     Persistence Layer                         │
-│                     PostgreSQL (SQLModel)                     │
+│                     Persistence Layer                        │
+│                     PostgreSQL (SQLModel)                    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -290,3 +290,7 @@ npx tsc --noEmit
 - Authentication & multi-tenancy
 - Additional outreach channels (SMS/WhatsApp), beyond a payment link
 - Background task queue for campaign execution
+
+
+
+Build by - Tarun Kumar
