@@ -1,0 +1,27 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.6
+sqlmodel>=0.0.22
+sqlalchemy>=2.0.35
+psycopg[binary]>=3.2.10
+alembic>=1.13.2
+pydantic>=2.9.2
+pydantic-settings>=2.5.2
+python-dotenv>=1.0.1
+faker>=28.4.1
+numpy>=2.1.1
+pytest>=8.3.3
+httpx>=0.27.2
+
+# Phase 2: recovery-prediction model (training + serving share this stack)
+pandas>=2.2
+pyarrow>=14  # pandas 3.x defaults to pyarrow-backed string dtypes when available -- must match training-time environment or joblib-pickled DataFrames fail to unpickle
+scikit-learn>=1.5
+joblib>=1.4
+xgboost>=2.1
+shap>=0.46
+
+# Phase 3: investigation agent LLM client
+google-genai>=1.0
+
+# Phase 5: Razorpay test-mode integration (official SDK)
+razorpay==2.0.1

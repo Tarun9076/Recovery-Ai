@@ -1,0 +1,41 @@
+# Environment
+.env
+backend/.env
+frontend/.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# ML artifacts
+ml/models/*.pkl
+ml/models/*.joblib
+ml/data/*.csv
+
+# Python test/coverage artifacts
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Claude Code local tool state (session data, local launch configs -- not project source)
+.claude/
+
+# Logs
+*.log

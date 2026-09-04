@@ -1,0 +1,209 @@
+{
+  "model_name": "recovery-prediction",
+  "model_version": "1.0.0",
+  "feature_version": "v1",
+  "algorithm": "LogisticRegression",
+  "training_timestamp": "2026-09-03T20:46:45.915391+00:00",
+  "decision_threshold": 0.65,
+  "features": [
+    "payment_amount",
+    "customer_lifetime_value",
+    "customer_order_count",
+    "customer_success_rate",
+    "customer_failure_count",
+    "previous_failed_attempts",
+    "attempt_number",
+    "time_since_customer_created_days",
+    "hour_of_day",
+    "day_of_week",
+    "payment_method",
+    "bank",
+    "failure_category",
+    "failure_severity",
+    "device_type",
+    "platform",
+    "location"
+  ],
+  "split": {
+    "train_start": "2026-07-09 02:02:52",
+    "train_end": "2026-08-16 19:07:21",
+    "val_start": "2026-08-16 19:10:29",
+    "val_end": "2026-08-25 07:32:27",
+    "test_start": "2026-08-25 07:54:41",
+    "test_end": "2026-09-03 01:32:39",
+    "train_size": 4671,
+    "val_size": 1001,
+    "test_size": 1001
+  },
+  "validation_results": {
+    "LogisticRegression": {
+      "pr_auc": 0.7091842095767817,
+      "roc_auc": 0.6304893617021277
+    },
+    "RandomForestClassifier": {
+      "pr_auc": 0.7084856658558956,
+      "roc_auc": 0.6327404255319149
+    },
+    "XGBClassifier": {
+      "pr_auc": 0.7030064930100364,
+      "roc_auc": 0.6136382978723403
+    }
+  },
+  "test_classification_metrics": {
+    "precision": 0.7084233261339092,
+    "recall": 0.5359477124183006,
+    "f1": 0.6102325581395349,
+    "roc_auc": 0.6506586353478838,
+    "pr_auc": 0.7234987422290169,
+    "brier_score": 0.22006382487148826,
+    "threshold": 0.65,
+    "false_positive_count": 135,
+    "false_negative_count": 284,
+    "true_positive_count": 328,
+    "true_negative_count": 254,
+    "false_positive_revenue_cost": 413183.24,
+    "false_negative_revenue_cost": 565537.28
+  },
+  "test_business_metrics": {
+    "predicted_recoverable_revenue": 1599276.4711920968,
+    "actual_recovered_revenue": 1581456.4500000002,
+    "prediction_error": 17820.02119209664,
+    "prediction_error_pct": 0.011268107441148086,
+    "calibration_bins": [
+      {
+        "mean_predicted": 0.32990953635823045,
+        "actual_rate": 0.31683168316831684,
+        "count": 101
+      },
+      {
+        "mean_predicted": 0.501898092936221,
+        "actual_rate": 0.53,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.5588992056715866,
+        "actual_rate": 0.54,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.5961235799578222,
+        "actual_rate": 0.53,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.6280168310254364,
+        "actual_rate": 0.66,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.6535136291853483,
+        "actual_rate": 0.62,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.6780402335826693,
+        "actual_rate": 0.68,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.7099200312596914,
+        "actual_rate": 0.68,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.7430282146682409,
+        "actual_rate": 0.76,
+        "count": 100
+      },
+      {
+        "mean_predicted": 0.804935917603619,
+        "actual_rate": 0.8,
+        "count": 100
+      }
+    ]
+  },
+  "feature_importance": [
+    {
+      "feature": "categorical__failure_category_INSUFFICIENT_FUNDS",
+      "importance": 1.1603216602775077
+    },
+    {
+      "feature": "categorical__failure_category_TECHNICAL_ERROR",
+      "importance": 0.6532833764387403
+    },
+    {
+      "feature": "categorical__failure_category_INVALID_DETAILS",
+      "importance": 0.5133781882635936
+    },
+    {
+      "feature": "categorical__failure_category_NETWORK_ERROR",
+      "importance": 0.42967042886064266
+    },
+    {
+      "feature": "categorical__failure_category_TIMEOUT",
+      "importance": 0.4239910216945297
+    },
+    {
+      "feature": "categorical__location_Chandigarh",
+      "importance": 0.2888668887328373
+    },
+    {
+      "feature": "categorical__failure_category_AUTHENTICATION_FAILURE",
+      "importance": 0.2276905355130571
+    },
+    {
+      "feature": "categorical__location_Ahmedabad",
+      "importance": 0.2148817013240747
+    },
+    {
+      "feature": "categorical__device_type_desktop",
+      "importance": 0.20014201611952417
+    },
+    {
+      "feature": "categorical__platform_android",
+      "importance": 0.19452692546698244
+    },
+    {
+      "feature": "categorical__location_Chennai",
+      "importance": 0.16424432113614437
+    },
+    {
+      "feature": "categorical__failure_category_UPI_FAILURE",
+      "importance": 0.1464806999807778
+    },
+    {
+      "feature": "categorical__failure_severity_LOW",
+      "importance": 0.1305408920123564
+    },
+    {
+      "feature": "numeric__payment_amount",
+      "importance": 0.12751909816540302
+    },
+    {
+      "feature": "categorical__bank_Falcon Bank",
+      "importance": 0.1208933528589576
+    },
+    {
+      "feature": "categorical__payment_method_upi",
+      "importance": 0.11037934431587024
+    },
+    {
+      "feature": "categorical__bank_Meridian Bank",
+      "importance": 0.10573371334687907
+    },
+    {
+      "feature": "categorical__location_Hyderabad",
+      "importance": 0.0958245731094191
+    },
+    {
+      "feature": "categorical__bank_Nimbus Bank",
+      "importance": 0.09216295383797786
+    },
+    {
+      "feature": "numeric__time_since_customer_created_days",
+      "importance": 0.08907550717363936
+    }
+  ],
+  "dataset_size": 6673,
+  "positive_rate": 0.6114191518057845
+}
